@@ -99,7 +99,7 @@ export async function printImage(host: string, imageBuffer: Buffer, copies: numb
 
   const init = Buffer.from([0x1b, 0x40])            // Initialize printer
   const centerAlign = Buffer.from([0x1b, 0x61, 1])  // Center alignment
-  const feed = Buffer.from([0x1b, 0x64, 4])          // Feed 4 lines before cut
+  const feed = Buffer.from([0x1b, 0x64, 6])          // Feed 6 lines before cut
   const cut = Buffer.from([0x1b, 0x69])              // Full cut
 
   const imageChunks = await imageToEscPos(imageBuffer)
