@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { printImage } from './printer.js'
@@ -6,6 +7,7 @@ import { printImage } from './printer.js'
 const app = new Hono()
 
 app.use('/*', cors())
+
 
 app.post('/print', async (c) => {
   const formData = await c.req.formData()
@@ -31,6 +33,9 @@ app.post('/print', async (c) => {
 
   return c.json({ success: true })
 })
+
+app.use('/*', serveStatic({ root: './public' }))
+app.use('/*', serveStatic({ path: './public/index.html' }))
 
 serve({
   fetch: app.fetch,

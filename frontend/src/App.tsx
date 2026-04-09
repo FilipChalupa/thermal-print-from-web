@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import './App.css'
 
-const BACKEND_URL = 'http://localhost:3000'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
 
 export default function App() {
   const [ip, setIp] = useState('')
