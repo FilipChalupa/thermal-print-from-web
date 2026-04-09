@@ -204,12 +204,7 @@ export default function App() {
         <div
           className="drag-overlay"
           onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault()
-            dragCounter.current = 0
-            setPageDragging(false)
-            if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
-          }}
+          onDrop={(e) => e.preventDefault()}
         >
           <p>Pustit pro přidání obrázků</p>
         </div>
