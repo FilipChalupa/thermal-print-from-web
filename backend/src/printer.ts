@@ -97,16 +97,17 @@ function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> 
 export async function printImage(host: string, imageBuffer: Buffer, copies: number): Promise<void> {
   const PORT = 9100
 
-  const init = Buffer.from([0x1b, 0x40])         // Initialize printer
-  const centerAlign = Buffer.from([0x1b, 0x61, 1]) // Center alignment
-  const cut = Buffer.from([0x1b, 0x69])            // Cut paper
+  const init = Buffer.from([0x1b, 0x40])            // Initialize printer
+  const centerAlign = Buffer.from([0x1b, 0x61, 1])  // Center alignment
+  const feed = Buffer.from([0x1b, 0x64, 4])          // Feed 4 lines before cut
+  const cut = Buffer.from([0x1b, 0x69])              // Full cut
 
   const imageChunks = await imageToEscPos(imageBuffer)
 
   const payload: Buffer[] = []
   payload.push(init, centerAlign)
   for (let i = 0; i < copies; i++) {
-    payload.push(...imageChunks, cut)
+    payload.push(...imageChunks, feed, cut)
   }
 
   await socketWrite(host, PORT, payload)
