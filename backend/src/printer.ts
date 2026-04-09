@@ -90,6 +90,10 @@ function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> 
         resolve()
       }, 500)
     })
+    socket.setTimeout(10_000)
+    socket.on('timeout', () => {
+      socket.destroy(new Error(`Tiskárna ${host} nereaguje (timeout 10 s)`))
+    })
     socket.on('error', reject)
   })
 }
