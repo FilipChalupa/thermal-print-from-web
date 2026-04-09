@@ -45,6 +45,28 @@ input[type='file'] {
   cursor: pointer;
 }
 
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 112, 243, 0.12);
+  border: 3px dashed #0070f3;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.drag-overlay p {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 28px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0070f3;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
 .drop-zone {
   border: 2px dashed #ccc;
   border-radius: 8px;
