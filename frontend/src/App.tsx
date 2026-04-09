@@ -58,13 +58,21 @@ export default function App() {
     function onDragOver(e: DragEvent) {
       e.preventDefault()
     }
+    function onDrop(e: DragEvent) {
+      e.preventDefault()
+      dragCounter.current = 0
+      setDragging(false)
+      if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
+    }
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragleave', onDragLeave)
     document.addEventListener('dragover', onDragOver)
+    document.addEventListener('drop', onDrop)
     return () => {
       document.removeEventListener('dragenter', onDragEnter)
       document.removeEventListener('dragleave', onDragLeave)
       document.removeEventListener('dragover', onDragOver)
+      document.removeEventListener('drop', onDrop)
     }
   }, [])
 
@@ -75,7 +83,7 @@ export default function App() {
     if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     if (!ip || images.length === 0) return
 
