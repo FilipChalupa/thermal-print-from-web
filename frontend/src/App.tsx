@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
+import { useStorageBackedState } from 'use-storage-backed-state'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
 
 export default function App() {
-  const [ip, setIp] = useState('')
+  const [ip, setIp] = useStorageBackedState({ key: 'printer-ip', defaultValue: '' })
   const [copies, setCopies] = useState(1)
   const [images, setImages] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
