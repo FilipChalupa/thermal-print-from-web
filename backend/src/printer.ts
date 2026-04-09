@@ -106,9 +106,8 @@ export async function printImage(host: string, imageBuffer: Buffer, copies: numb
   const payload: Buffer[] = []
   payload.push(init, centerAlign)
   for (let i = 0; i < copies; i++) {
-    payload.push(...imageChunks)
+    payload.push(...imageChunks, cut)
   }
-  payload.push(cut)
 
   await socketWrite(host, PORT, payload)
 }
