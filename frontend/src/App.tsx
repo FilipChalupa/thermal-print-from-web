@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
@@ -6,33 +6,69 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
 export default function App() {
   const [ip, setIp] = useState('')
   const [copies, setCopies] = useState(1)
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
+  const [images, setImages] = useState<File[]>([])
+  const [previews, setPreviews] = useState<string[]>([])
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null
-    setImageFile(file)
-    if (file) {
-      setPreview(URL.createObjectURL(file))
-    } else {
-      setPreview(null)
-    }
+  function addFiles(files: FileList | File[]) {
+    const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (imageFiles.length === 0) return
+    setImages((prev) => {
+      const next = [...prev, ...imageFiles]
+      setPreviews(next.map((f) => URL.createObjectURL(f)))
+      return next
+    })
   }
+
+  function removeImage(index: number) {
+    setImages((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      setPreviews(next.map((f) => URL.createObjectURL(f)))
+      return next
+    })
+  }
+
+  // Clipboard paste
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (e.clipboardData?.files.length) {
+        addFiles(e.clipboardData.files)
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [])
+
+  // Drag & drop
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(true)
+  }, [])
+
+  const onDragLeave = useCallback(() => setDragging(false), [])
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    addFiles(e.dataTransfer.files)
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!ip || !imageFile) return
+    if (!ip || images.length === 0) return
 
     setStatus('loading')
     setErrorMsg('')
 
     const formData = new FormData()
     formData.append('ip', ip)
-    formData.append('image', imageFile)
     formData.append('copies', String(copies))
+    for (const image of images) {
+      formData.append('images', image)
+    }
 
     try {
       const res = await fetch(`${BACKEND_URL}/print`, {
@@ -69,21 +105,40 @@ export default function App() {
           />
         </label>
 
-        <label>
-          Obrázek
+        <div
+          className={`drop-zone ${dragging ? 'dragging' : ''}`}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          onClick={() => fileInputRef.current?.click()}
+        >
           <input
-            ref={inputRef}
+            ref={fileInputRef}
             type="file"
             accept="image/*"
-            onChange={handleImageChange}
-            required
+            multiple
+            onChange={(e) => e.target.files && addFiles(e.target.files)}
+            style={{ display: 'none' }}
           />
-        </label>
+          <p>Přetáhněte obrázky, vložte z clipboardu nebo <span className="link">vyberte ze souborů</span></p>
+        </div>
 
-        {preview && (
-          <div className="preview">
-            <img src={preview} alt="Náhled" />
-          </div>
+        {previews.length > 0 && (
+          <ul className="preview-grid">
+            {previews.map((src, i) => (
+              <li key={src}>
+                <img src={src} alt={`Obrázek ${i + 1}`} />
+                <button
+                  type="button"
+                  className="remove-btn"
+                  onClick={() => removeImage(i)}
+                  aria-label="Odebrat"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
 
         <label>
@@ -97,8 +152,8 @@ export default function App() {
           />
         </label>
 
-        <button type="submit" disabled={status === 'loading'}>
-          {status === 'loading' ? 'Odesílám...' : 'Tisknout'}
+        <button type="submit" disabled={status === 'loading' || images.length === 0}>
+          {status === 'loading' ? 'Odesílám...' : `Tisknout${images.length > 1 ? ` (${images.length} fotek)` : ''}`}
         </button>
       </form>
 

@@ -13,23 +13,24 @@ app.post('/print', async (c) => {
   const formData = await c.req.formData()
 
   const ip = formData.get('ip')
-  const image = formData.get('image')
+  const imageFiles = formData.getAll('images')
   const copiesRaw = formData.get('copies')
 
   if (!ip || typeof ip !== 'string') {
     return c.json({ error: 'IP address is required' }, 400)
   }
 
-  if (!image || !(image instanceof File)) {
-    return c.json({ error: 'Image is required' }, 400)
+  if (imageFiles.length === 0) {
+    return c.json({ error: 'At least one image is required' }, 400)
   }
 
   const copies = Math.max(1, Math.min(99, parseInt(copiesRaw as string) || 1))
 
-  const arrayBuffer = await image.arrayBuffer()
-  const buffer = Buffer.from(arrayBuffer)
-
-  await printImage(ip, buffer, copies)
+  for (const image of imageFiles) {
+    if (!(image instanceof File)) continue
+    const buffer = Buffer.from(await image.arrayBuffer())
+    await printImage(ip, buffer, copies)
+  }
 
   return c.json({ success: true })
 })
