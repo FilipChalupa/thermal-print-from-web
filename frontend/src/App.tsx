@@ -58,6 +58,8 @@ export default function App() {
           IP adresa tiskárny
           <input
             type="text"
+            name="printer-ip"
+            autoComplete="on"
             value={ip}
             onChange={(e) => setIp(e.target.value)}
             placeholder="192.168.1.100"
