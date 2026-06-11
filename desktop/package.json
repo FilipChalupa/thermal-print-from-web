@@ -33,7 +33,11 @@
 			"target": [
 				"dmg",
 				"zip"
-			]
+			],
+			"artifactName": "Thermal-Print-${arch}-mac.${ext}"
+		},
+		"dmg": {
+			"artifactName": "Thermal-Print-${version}-${arch}.${ext}"
 		},
 		"win": {
 			"target": "nsis"
