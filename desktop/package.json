@@ -1,0 +1,38 @@
+{
+	"name": "desktop",
+	"productName": "Thermal Print",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "main.js",
+	"scripts": {
+		"sync": "node scripts/sync.mjs",
+		"start": "npm run sync && electron .",
+		"dist": "npm run sync && electron-builder"
+	},
+	"dependencies": {
+		"@hono/node-server": "^1.19.13",
+		"hono": "^4.12.12",
+		"iconv-lite": "^0.7.2",
+		"skia-canvas": "^3.0.8"
+	},
+	"devDependencies": {
+		"electron": "^37.2.0",
+		"electron-builder": "^26.0.12"
+	},
+	"build": {
+		"appId": "co.netvor.thermal-print",
+		"productName": "Thermal Print",
+		"files": [
+			"main.js",
+			"server/**",
+			"public/**"
+		],
+		"mac": {
+			"target": "dmg"
+		},
+		"win": {
+			"target": "nsis"
+		}
+	}
+}

@@ -4,7 +4,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { stream } from 'hono/streaming'
 import { dirname, join } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { printImage } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -61,9 +61,20 @@ app.post('/print', async (c) => {
 app.use('/*', serveStatic({ root: publicDir }))
 app.use('/*', serveStatic({ path: join(publicDir, 'index.html') }))
 
-serve({
-  fetch: app.fetch,
-  port: 3000,
-}, (info) => {
-  console.log(`Server is running on http://localhost:${info.port}`)
-})
+export function startServer(options: { port?: number; hostname?: string } = {}): Promise<{ port: number }> {
+  return new Promise((resolve) => {
+    serve({
+      fetch: app.fetch,
+      port: options.port ?? 3000,
+      hostname: options.hostname,
+    }, (info) => {
+      console.log(`Server is running on http://localhost:${info.port}`)
+      resolve({ port: info.port })
+    })
+  })
+}
+
+const isRunDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isRunDirectly) {
+  startServer({ port: Number(process.env.PORT) || 3000 })
+}

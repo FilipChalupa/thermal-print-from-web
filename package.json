@@ -1,8 +1,10 @@
 {
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
-    "build": "npm run build --prefix frontend && npm run build --prefix backend && cp -r frontend/dist backend/public",
-    "start": "node backend/dist/index.js"
+    "build": "npm run build --prefix frontend && npm run build --prefix backend && rm -rf backend/public && cp -r frontend/dist backend/public",
+    "start": "node backend/dist/index.js",
+    "desktop": "npm run build --prefix frontend && npm run build --prefix backend && npm run start --prefix desktop",
+    "desktop:dist": "npm run build --prefix frontend && npm run build --prefix backend && npm run dist --prefix desktop"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
