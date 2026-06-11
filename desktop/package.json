@@ -23,6 +23,7 @@
 	"build": {
 		"appId": "co.netvor.thermal-print",
 		"productName": "Thermal Print",
+		"afterPack": "scripts/afterPack.cjs",
 		"files": [
 			"main.js",
 			"server/**",

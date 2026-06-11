@@ -49,7 +49,13 @@ git push --follow-tags
 
 Push tagu `v*` spustí workflow [release.yml](.github/workflows/release.yml), které na macOS a Windows runnerech buildne instalátory a vytvoří GitHub release s `.dmg` (Apple Silicon) a `.exe` ke stažení. Verze v `desktop/package.json` se při `npm version` synchronizuje automaticky.
 
-Instalátory nejsou podepsané — macOS i Windows při prvním spuštění zobrazí varování (na macOS je potřeba otevřít přes pravý klik → Otevřít).
+Instalátory nejsou podepsané vývojářským certifikátem. macOS appku podepsanou jen ad-hoc odmítne otevřít („is damaged“), dokud se neodstraní quarantine atribut:
+
+```bash
+xattr -cr "/Applications/Thermal Print.app"
+```
+
+Windows zobrazí SmartScreen varování (More info → Run anyway). Plné odstranění obou varování vyžaduje Apple Developer účet (podpis + notarizace) resp. Windows code signing certifikát.
 
 ## Deploy (Coolify)
 

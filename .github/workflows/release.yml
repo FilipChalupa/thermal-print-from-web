@@ -37,6 +37,19 @@ jobs:
       - name: Create release and upload installers
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ### macOS
+
+            Aplikace není notarizovaná Applem, takže ji macOS po stažení odmítne otevřít.
+            Po přetažení do Applications spusť v Terminálu:
+
+            ```
+            xattr -cr "/Applications/Thermal Print.app"
+            ```
+
+            ### Windows
+
+            SmartScreen může zobrazit varování — pokračuj přes „More info“ → „Run anyway“.
           files: |
             desktop/dist/*.dmg
             desktop/dist/*.exe
