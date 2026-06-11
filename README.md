@@ -49,11 +49,15 @@ git push --follow-tags
 
 Push tagu `v*` spustí workflow [release.yml](.github/workflows/release.yml), které na macOS a Windows runnerech buildne instalátory a vytvoří GitHub release s `.dmg` (Apple Silicon) a `.exe` ke stažení. Verze v `desktop/package.json` se při `npm version` synchronizuje automaticky.
 
-Instalátory nejsou podepsané vývojářským certifikátem. macOS appku podepsanou jen ad-hoc odmítne otevřít („is damaged“), dokud se neodstraní quarantine atribut:
+Instalátory nejsou podepsané vývojářským certifikátem.
+
+Na macOS je proto doporučená instalace přes [install-mac.sh](install-mac.sh) — curl nepřidává quarantine atribut, takže Gatekeeper nic neblokuje:
 
 ```bash
-xattr -cr "/Applications/Thermal Print.app"
+curl -fsSL https://raw.githubusercontent.com/FilipChalupa/thermal-print-from-web/main/install-mac.sh | bash
 ```
+
+Ručně stažený `.dmg` macOS odmítne otevřít („is damaged“), dokud se quarantine neodstraní: `xattr -cr "/Applications/Thermal Print.app"`.
 
 Windows zobrazí SmartScreen varování (More info → Run anyway). Plné odstranění obou varování vyžaduje Apple Developer účet (podpis + notarizace) resp. Windows code signing certifikát.
 

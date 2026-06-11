@@ -40,16 +40,19 @@ jobs:
           body: |
             ### macOS
 
-            Aplikace není notarizovaná Applem, takže ji macOS po stažení odmítne otevřít.
-            Po přetažení do Applications spusť v Terminálu:
+            Doporučená instalace — jeden příkaz v Terminálu, bez Gatekeeper varování:
 
             ```
-            xattr -cr "/Applications/Thermal Print.app"
+            curl -fsSL https://raw.githubusercontent.com/FilipChalupa/thermal-print-from-web/main/install-mac.sh | bash
             ```
+
+            (Aplikace není notarizovaná Applem. Pokud místo toho stáhneš `.dmg` prohlížečem,
+            macOS ji odmítne otevřít, dokud nespustíš `xattr -cr "/Applications/Thermal Print.app"`.)
 
             ### Windows
 
             SmartScreen může zobrazit varování — pokračuj přes „More info“ → „Run anyway“.
           files: |
             desktop/dist/*.dmg
+            desktop/dist/*.zip
             desktop/dist/*.exe
