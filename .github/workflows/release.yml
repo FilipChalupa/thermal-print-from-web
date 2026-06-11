@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Bez podepisování — electron-builder by jinak na macOS hledal certifikát
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci --prefix frontend
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix desktop
+
+      - run: npm run build --prefix frontend
+      - run: npm run build --prefix backend
+
+      - run: npm run dist --prefix desktop -- --publish never
+
+      - name: Create release and upload installers
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/dist/*.dmg
+            desktop/dist/*.exe
