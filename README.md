@@ -91,3 +91,20 @@ Frontend očekává URL backendu v environment variable:
 ```
 VITE_BACKEND_URL=https://tvuj-backend.domena.cz
 ```
+
+### Deploy včetně síťové tiskárny (driverless tisk)
+
+Web (HTTP) funguje odkudkoli, ale **driverless tisk (AirPrint / IPP Everywhere) funguje jen z hostitele na stejné LAN** jako tiskárna a zařízení, ze kterých tiskneš — mDNS discovery jede přes UDP multicast, který neprojde přes internet ani mezi podsítěmi.
+
+Navíc je potřeba **host networking** — v běžné Docker bridge síti se multicast na LAN nedostane. Použij proto [docker-compose.yml](docker-compose.yml) jako **Docker Compose** resource v Coolify; má `network_mode: host` a perzistuje vybranou tiskárnu.
+
+Na hostiteli povol na LAN příchozí provoz:
+
+- **UDP 5353** (mDNS/Bonjour discovery)
+- **TCP `IPP_PORT`** (výchozí 6310, IPP)
+
+Web port (`PORT`, výchozí 3000) řeší Coolify proxy pro doménu jako obvykle.
+
+> **Pozor na `avahi-daemon`:** pokud na hostiteli běží (typicky desktopové Linuxy), drží UDP 5353 a mDNS advertising může kolidovat. Na serveru většinou neběží; pokud ano, buď ho vypni, nebo počítej s možnou kolizí (hlídej logy `mDNS advertising error`).
+
+Po nasazení otevři web, v selectu se objeví nalezené tiskárny — jednu zahvězdičkuj jako cíl systémového tisku (nebo se první nalezená zvolí automaticky). Pak na klientech přidej tiskárnu (macOS AirPrint / Windows IPP Everywhere) — objeví se sama.
