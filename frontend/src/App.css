@@ -59,6 +59,103 @@ label {
   font-size: 0.8rem;
 }
 
+.ip-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ip-row input[type='text'] {
+  flex: 1;
+}
+
+.star-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #c9a100;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.star-btn:hover:not(:disabled) {
+  border-color: #c9a100;
+}
+
+.star-btn.is-starred {
+  background: #fff7d6;
+  border-color: #e6c200;
+}
+
+.star-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.system-target {
+  font-weight: 400;
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.system-target strong {
+  color: #333;
+  font-weight: 600;
+}
+
+.printer-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.printer-list li {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.printer-list li.starred .printer-pick {
+  border-color: #e6c200;
+  background: #fffdf3;
+}
+
+.printer-pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.printer-pick:hover {
+  border-color: #0070f3;
+}
+
+.printer-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.printer-ip {
+  font-size: 0.8rem;
+  color: #888;
+}
+
 input[type='text'],
 input[type='number'] {
   padding: 10px 12px;

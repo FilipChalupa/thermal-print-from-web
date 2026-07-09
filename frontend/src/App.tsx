@@ -48,6 +48,8 @@ export default function App() {
   const [progress, setProgress] = useState<PrintProgress | null>(null)
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([])
   const [discovering, setDiscovering] = useState(false)
+  // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
+  const [starredIp, setStarredIp] = useState('')
   const [pageDragging, setPageDragging] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -55,35 +57,33 @@ export default function App() {
   const isReordering = useRef(false)
   const reorderDragIndex = useRef<number | null>(null)
 
-  // Hydrate the IP from the backend config on first load (used by the network
-  // "driverless printer" path), falling back to whatever is stored locally.
-  const hydratedFromBackend = useRef(false)
+  // Load the starred printer (the system-print target) from the backend on load,
+  // and pre-fill the manual IP field with it when nothing is entered yet.
   useEffect(() => {
     fetch(`${BACKEND_URL}/config`)
       .then((r) => (r.ok ? r.json() : null))
       .then((cfg) => {
-        if (cfg?.printerIp && !ip) setIp(cfg.printerIp)
+        if (!cfg?.printerIp) return
+        setStarredIp(cfg.printerIp)
+        if (!ip) setIp(cfg.printerIp)
       })
       .catch(() => {})
-      .finally(() => {
-        hydratedFromBackend.current = true
-      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Keep the backend config in sync so IPP jobs (which carry no IP) know where
-  // to forward. Debounced to avoid a request per keystroke.
-  useEffect(() => {
-    if (!hydratedFromBackend.current) return
-    const id = setTimeout(() => {
-      fetch(`${BACKEND_URL}/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printerIp: ip }),
-      }).catch(() => {})
-    }, 500)
-    return () => clearTimeout(id)
-  }, [ip])
+  // Star an IP as the destination for system print jobs (Cmd/Ctrl+P via the
+  // virtual printer). Persisted server-side because IPP jobs carry no IP.
+  function starIp(target: string) {
+    const value = target.trim()
+    if (!value) return
+    setStarredIp(value)
+    setIp(value)
+    fetch(`${BACKEND_URL}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ printerIp: value }),
+    }).catch(() => {})
+  }
 
   // Auto-discover thermal printers on the LAN to suggest IP addresses.
   function discoverPrinters() {
@@ -251,6 +251,11 @@ export default function App() {
     }
   }
 
+  // Prefer the discovered friendly name for the starred printer, fall back to IP.
+  const starredLabel = discovered.find((p) => p.ip === starredIp)?.name
+    ? `${discovered.find((p) => p.ip === starredIp)!.name} (${starredIp})`
+    : starredIp
+
   return (
     <>
       {pageDragging && (
@@ -278,18 +283,30 @@ export default function App() {
                 {discovering ? 'Hledám…' : '↻ Vyhledat'}
               </button>
             </span>
-            <input
-              type="text"
-              name="printer-ip"
-              list="printer-suggestions"
-              autoComplete="on"
-              value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              placeholder="192.168.1.100"
-              required
-              pattern="^(\d{1,3}\.){3}\d{1,3}$"
-              title="Zadejte platnou IPv4 adresu"
-            />
+            <div className="ip-row">
+              <input
+                type="text"
+                name="printer-ip"
+                list="printer-suggestions"
+                autoComplete="on"
+                value={ip}
+                onChange={(e) => setIp(e.target.value)}
+                placeholder="192.168.1.100"
+                required
+                pattern="^(\d{1,3}\.){3}\d{1,3}$"
+                title="Zadejte platnou IPv4 adresu"
+              />
+              <button
+                type="button"
+                className={`star-btn${ip && ip === starredIp ? ' is-starred' : ''}`}
+                onClick={() => starIp(ip)}
+                disabled={!ip}
+                title="Nastavit jako cíl systémového tisku (Cmd/Ctrl+P)"
+                aria-label="Nastavit jako cíl systémového tisku"
+              >
+                {ip && ip === starredIp ? '★' : '☆'}
+              </button>
+            </div>
             <datalist id="printer-suggestions">
               {discovered.map((p) => (
                 <option key={p.ip} value={p.ip}>
@@ -297,8 +314,37 @@ export default function App() {
                 </option>
               ))}
             </datalist>
+
+            <small className="system-target">
+              {starredIp ? (
+                <>
+                  Systémový tisk (Cmd/Ctrl+P) míří na <strong>★ {starredLabel}</strong>
+                </>
+              ) : (
+                <>Zahvězdičkuj tiskárnu níže — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
+              )}
+            </small>
+
             {discovered.length > 0 && (
-              <small className="discover-hint">Nalezeno {discovered.length} zařízení v síti</small>
+              <ul className="printer-list">
+                {discovered.map((p) => (
+                  <li key={p.ip} className={p.ip === starredIp ? 'starred' : ''}>
+                    <button type="button" className="printer-pick" onClick={() => setIp(p.ip)}>
+                      <span className="printer-name">{p.name ?? 'Termální tiskárna'}</span>
+                      <span className="printer-ip">{p.ip}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`star-btn${p.ip === starredIp ? ' is-starred' : ''}`}
+                      onClick={() => starIp(p.ip)}
+                      title="Nastavit jako cíl systémového tisku"
+                      aria-label={`Nastavit ${p.ip} jako cíl systémového tisku`}
+                    >
+                      {p.ip === starredIp ? '★' : '☆'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </label>
 
