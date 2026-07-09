@@ -11,6 +11,9 @@ export default defineConfig({
       '/print-test-all': 'http://localhost:3000',
       '/config': 'http://localhost:3000',
       '/discover': 'http://localhost:3000',
+      '/printers': 'http://localhost:3000',
+      '/jobs': 'http://localhost:3000',
+      '/health': 'http://localhost:3000',
     },
   },
 })

@@ -5,6 +5,17 @@ export interface DiscoveredPrinter {
   name?: string
   port: number
   source: 'mdns' | 'scan' | 'manual'
+  verified?: boolean
+}
+
+/** A printer as shown in the select: discovered, saved or manually entered. */
+export interface UiPrinter {
+  ip: string
+  name?: string
+  source: 'mdns' | 'scan' | 'manual' | 'saved'
+  verified?: boolean
+  online: boolean
+  saved: boolean
 }
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/
@@ -21,20 +32,27 @@ function PrinterIcon() {
   )
 }
 
+function PencilIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+
 interface Props {
-  /** Currently selected IP (target of the manual web print). */
   value: string
   onChange: (ip: string) => void
-  printers: DiscoveredPrinter[]
+  printers: UiPrinter[]
   discovering: boolean
   onRefresh: () => void
-  /** IP that OS/system print jobs are forwarded to. */
   starredIp: string
   onStar: (ip: string) => void
-  /** Print a text test receipt to a single printer. */
   onTest: (ip: string, name?: string) => void
-  /** Print a test receipt to every discovered printer. */
   onTestAll: () => void
+  onRename: (ip: string, name: string) => void
+  onRemove: (ip: string) => void
 }
 
 export default function PrinterSelect({
@@ -47,23 +65,14 @@ export default function PrinterSelect({
   onStar,
   onTest,
   onTestAll,
+  onRename,
+  onRemove,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState('')
+  const [editingIp, setEditingIp] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
-
-  // Merge in the selected/starred IP when it isn't among the discovered ones, so
-  // a manually entered (and possibly starred) printer is still visible & pickable.
-  const options: DiscoveredPrinter[] = [...printers]
-  const known = new Set(printers.map((p) => p.ip))
-  for (const extraIp of [starredIp, value]) {
-    if (extraIp && IPV4.test(extraIp) && !known.has(extraIp)) {
-      known.add(extraIp)
-      options.push({ ip: extraIp, port: 9100, source: 'manual' })
-    }
-  }
-  const displayName = (p: DiscoveredPrinter) =>
-    p.name ?? (p.source === 'manual' ? 'Ručně zadaná tiskárna' : 'Termální tiskárna')
 
   useEffect(() => {
     if (!open) return
@@ -81,7 +90,10 @@ export default function PrinterSelect({
     }
   }, [open])
 
-  const selected = options.find((p) => p.ip === value)
+  const displayName = (p: { name?: string; source: string }) =>
+    p.name ?? (p.source === 'manual' ? 'Ručně zadaná tiskárna' : 'Termální tiskárna')
+
+  const selected = printers.find((p) => p.ip === value)
   const triggerLabel = selected ? displayName(selected) : value || 'Vyber tiskárnu'
   const triggerSub = selected ? selected.ip : ''
 
@@ -91,6 +103,16 @@ export default function PrinterSelect({
     onChange(ip)
     setManual('')
     setOpen(false)
+  }
+
+  function startRename(p: UiPrinter) {
+    setEditingIp(p.ip)
+    setDraft(displayName(p))
+  }
+  function commitRename() {
+    if (editingIp && draft.trim()) onRename(editingIp, draft.trim())
+    setEditingIp(null)
+    setDraft('')
   }
 
   return (
@@ -134,26 +156,70 @@ export default function PrinterSelect({
           </div>
 
           <ul className="ps-list">
-            {options.map((p) => {
+            {printers.map((p) => {
               const isSelected = p.ip === value
               const isStarred = p.ip === starredIp
+              const unverified = p.online && p.source === 'scan' && !p.verified
               return (
                 <li key={p.ip} className={`${isSelected ? 'selected' : ''} ${isStarred ? 'starred' : ''}`.trim()}>
+                  {editingIp === p.ip ? (
+                    <input
+                      className="ps-rename-input"
+                      autoFocus
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          commitRename()
+                        } else if (e.key === 'Escape') {
+                          setEditingIp(null)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="ps-option"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => {
+                        onChange(p.ip)
+                        setOpen(false)
+                      }}
+                    >
+                      <span
+                        className={`ps-dot ${p.online ? 'online' : 'offline'}`}
+                        title={p.online ? 'Online' : 'Offline (uložená)'}
+                      />
+                      <span className="ps-option-main">
+                        <span className="ps-name">
+                          {displayName(p)}
+                          {unverified && (
+                            <span className="ps-unverified" title="Port 9100 otevřený, ale nepotvrzeno jako ESC/POS tiskárna">
+                              {' '}
+                              ?
+                            </span>
+                          )}
+                        </span>
+                        <span className="ps-ip">{p.ip}</span>
+                      </span>
+                      {isSelected && (
+                        <span className="ps-check" aria-hidden>
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="ps-option"
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => {
-                      onChange(p.ip)
-                      setOpen(false)
-                    }}
+                    className="ps-icon-btn ps-edit"
+                    onClick={() => startRename(p)}
+                    title="Přejmenovat (uloží tiskárnu)"
+                    aria-label={`Přejmenovat ${p.ip}`}
                   >
-                    <span className="ps-option-main">
-                      <span className="ps-name">{displayName(p)}</span>
-                      <span className="ps-ip">{p.ip}</span>
-                    </span>
-                    {isSelected && <span className="ps-check" aria-hidden>✓</span>}
+                    <PencilIcon />
                   </button>
                   <button
                     type="button"
@@ -173,15 +239,26 @@ export default function PrinterSelect({
                   >
                     {isStarred ? '★' : '☆'}
                   </button>
+                  {p.saved && (
+                    <button
+                      type="button"
+                      className="ps-icon-btn ps-remove"
+                      onClick={() => onRemove(p.ip)}
+                      title="Odebrat uloženou tiskárnu"
+                      aria-label={`Odebrat ${p.ip}`}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </li>
               )
             })}
-            {options.length === 0 && (
+            {printers.length === 0 && (
               <li className="ps-empty">{discovering ? 'Hledám tiskárny…' : 'Žádná tiskárna nenalezena'}</li>
             )}
           </ul>
 
-          {options.length > 0 && (
+          {printers.length > 0 && (
             <button type="button" className="ps-testall" onClick={onTestAll}>
               <PrinterIcon /> Otestovat všechny tiskárny
             </button>

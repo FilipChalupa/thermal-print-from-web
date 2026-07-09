@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useMirrorLoading } from 'shared-loading-indicator'
 import { useStorageBackedState } from 'use-storage-backed-state'
-import PrinterSelect, { type DiscoveredPrinter } from './PrinterSelect'
+import PrinterSelect, { type DiscoveredPrinter, type UiPrinter } from './PrinterSelect'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
@@ -24,6 +24,22 @@ interface PrintProgress {
   current: number
   total: number
   name: string
+}
+
+interface SavedPrinter {
+  ip: string
+  name: string
+}
+
+interface JobLogEntry {
+  id: number
+  at: number
+  source: 'ipp' | 'web' | 'test'
+  printerIp: string
+  name: string
+  pages?: number
+  status: 'ok' | 'error'
+  error?: string
 }
 
 async function applyRotation(file: File, degrees: number): Promise<Blob> {
@@ -51,6 +67,9 @@ export default function App() {
   const [progress, setProgress] = useState<PrintProgress | null>(null)
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([])
   const [discovering, setDiscovering] = useState(false)
+  const [saved, setSaved] = useState<SavedPrinter[]>([])
+  const [paperWidthDots, setPaperWidthDots] = useState(576)
+  const [jobs, setJobs] = useState<JobLogEntry[]>([])
   // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
   const [starredIp, setStarredIp] = useState('')
   const [testMsg, setTestMsg] = useState('')
@@ -65,17 +84,33 @@ export default function App() {
   const isReordering = useRef(false)
   const reorderDragIndex = useRef<number | null>(null)
 
-  // Load the starred printer (the system-print target) from the backend on load,
-  // and pre-fill the manual IP field with it when nothing is entered yet.
+  const esRef = useRef<EventSource | null>(null)
+
+  function refreshJobs() {
+    fetch(`${BACKEND_URL}/jobs`)
+      .then((r) => (r.ok ? r.json() : { jobs: [] }))
+      .then((d) => setJobs(Array.isArray(d.jobs) ? d.jobs : []))
+      .catch(() => {})
+  }
+
+  // Load config (starred printer, paper size), saved printers and recent jobs.
   useEffect(() => {
     fetch(`${BACKEND_URL}/config`)
       .then((r) => (r.ok ? r.json() : null))
       .then((cfg) => {
-        if (!cfg?.printerIp) return
-        setStarredIp(cfg.printerIp)
-        if (!ip) setIp(cfg.printerIp)
+        if (!cfg) return
+        if (cfg.paperWidthDots) setPaperWidthDots(cfg.paperWidthDots)
+        if (cfg.printerIp) {
+          setStarredIp(cfg.printerIp)
+          if (!ip) setIp(cfg.printerIp)
+        }
       })
       .catch(() => {})
+    fetch(`${BACKEND_URL}/printers`)
+      .then((r) => (r.ok ? r.json() : { printers: [] }))
+      .then((d) => setSaved(Array.isArray(d.printers) ? d.printers : []))
+      .catch(() => {})
+    refreshJobs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -93,17 +128,38 @@ export default function App() {
     }).catch(() => {})
   }
 
-  // Auto-discover thermal printers on the LAN to suggest IP addresses.
+  // Live discovery over SSE: printers appear as they are found (mDNS instantly,
+  // port scan trickles in) rather than blocking on the whole sweep.
   function discoverPrinters() {
+    esRef.current?.close()
+    setDiscovered([])
     setDiscovering(true)
-    fetch(`${BACKEND_URL}/discover`)
-      .then((r) => (r.ok ? r.json() : { printers: [] }))
-      .then((d) => setDiscovered(Array.isArray(d.printers) ? d.printers : []))
-      .catch(() => {})
-      .finally(() => setDiscovering(false))
+    const es = new EventSource(`${BACKEND_URL}/discover/stream`)
+    esRef.current = es
+    es.addEventListener('printer', (e) => {
+      const p = JSON.parse((e as MessageEvent).data) as DiscoveredPrinter
+      setDiscovered((prev) => {
+        const existing = prev.find((x) => x.ip === p.ip)
+        const merged: DiscoveredPrinter = {
+          ...existing,
+          ...p,
+          name: p.name ?? existing?.name,
+          verified: p.verified || existing?.verified,
+        }
+        return [...prev.filter((x) => x.ip !== p.ip), merged]
+      })
+    })
+    const stop = () => {
+      setDiscovering(false)
+      es.close()
+      if (esRef.current === es) esRef.current = null
+    }
+    es.addEventListener('done', stop)
+    es.onerror = stop
   }
   useEffect(() => {
     discoverPrinters()
+    return () => esRef.current?.close()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -115,6 +171,59 @@ export default function App() {
     if (pick) starIp(pick.ip)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discovered, starredIp])
+
+  // Rename (and thereby save) a printer, or remove a saved one.
+  function renamePrinter(target: string, name: string) {
+    fetch(`${BACKEND_URL}/printers`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: target, name }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.printers && setSaved(d.printers))
+      .catch(() => {})
+  }
+  function removeSavedPrinter(target: string) {
+    fetch(`${BACKEND_URL}/printers`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: target }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.printers && setSaved(d.printers))
+      .catch(() => {})
+  }
+  function changePaperWidth(dots: number) {
+    setPaperWidthDots(dots)
+    fetch(`${BACKEND_URL}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paperWidthDots: dots }),
+    }).catch(() => {})
+  }
+
+  // Merge saved + live-discovered + the current/starred IP into one list.
+  const mergedPrinters: UiPrinter[] = (() => {
+    const byIp = new Map<string, UiPrinter>()
+    for (const s of saved) byIp.set(s.ip, { ip: s.ip, name: s.name, source: 'saved', online: false, saved: true })
+    for (const d of discovered) {
+      const ex = byIp.get(d.ip)
+      byIp.set(d.ip, {
+        ip: d.ip,
+        name: ex?.name ?? d.name,
+        source: ex?.saved ? 'saved' : d.source,
+        verified: d.verified,
+        online: true,
+        saved: ex?.saved ?? false,
+      })
+    }
+    for (const extra of [starredIp, ip]) {
+      if (extra && IPV4.test(extra) && !byIp.has(extra)) {
+        byIp.set(extra, { ip: extra, source: 'manual', online: false, saved: false })
+      }
+    }
+    return [...byIp.values()].sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }))
+  })()
 
   // Print a text test receipt (name + IP) so the user can confirm which physical
   // device an IP belongs to.
@@ -133,6 +242,7 @@ export default function App() {
       setTestMsg(`Nepodařilo se odeslat test na ${ip}`)
     } finally {
       setTesting(false)
+      refreshJobs()
     }
   }
 
@@ -149,6 +259,7 @@ export default function App() {
       setTestMsg('Nepodařilo se odeslat testy')
     } finally {
       setTesting(false)
+      refreshJobs()
     }
   }
 
@@ -297,17 +408,18 @@ export default function App() {
       }
       setStatus('success')
       setProgress(null)
+      refreshJobs()
     } catch (err) {
       setStatus('error')
       setProgress(null)
       setErrorMsg(err instanceof Error ? err.message : 'Unknown error')
+      refreshJobs()
     }
   }
 
-  // Prefer the discovered friendly name for the starred printer, fall back to IP.
-  const starredLabel = discovered.find((p) => p.ip === starredIp)?.name
-    ? `${discovered.find((p) => p.ip === starredIp)!.name} (${starredIp})`
-    : starredIp
+  // Prefer a friendly (saved/discovered) name for the starred printer.
+  const starredMatch = mergedPrinters.find((p) => p.ip === starredIp)
+  const starredLabel = starredMatch?.name ? `${starredMatch.name} (${starredIp})` : starredIp
 
   return (
     <>
@@ -328,13 +440,15 @@ export default function App() {
             <PrinterSelect
               value={ip}
               onChange={setIp}
-              printers={discovered}
+              printers={mergedPrinters}
               discovering={discovering}
               onRefresh={discoverPrinters}
               starredIp={starredIp}
               onStar={starIp}
               onTest={printTest}
               onTestAll={printTestAll}
+              onRename={renamePrinter}
+              onRemove={removeSavedPrinter}
             />
             <small className="system-target">
               {starredIp ? (
@@ -346,6 +460,14 @@ export default function App() {
               )}
             </small>
             {testMsg && <small className="test-msg">{testMsg}</small>}
+          </label>
+
+          <label className="paper-size">
+            Šířka papíru
+            <select value={paperWidthDots} onChange={(e) => changePaperWidth(Number(e.target.value))}>
+              <option value={576}>80 mm (576 bodů)</option>
+              <option value={384}>58 mm (384 bodů)</option>
+            </select>
           </label>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
@@ -425,7 +547,45 @@ export default function App() {
 
         {status === 'success' && <p className="msg success">Odesláno do tiskárny!</p>}
         {status === 'error' && <p className="msg error">Chyba: {errorMsg}</p>}
+
+        {jobs.length > 0 && (
+          <section className="jobs">
+            <div className="jobs-head">
+              <h2>Poslední úlohy</h2>
+              <button type="button" className="jobs-refresh" onClick={refreshJobs}>
+                ↻
+              </button>
+            </div>
+            <ul className="jobs-list">
+              {jobs.slice(0, 10).map((j) => (
+                <li key={j.id} className={j.status === 'error' ? 'job-error' : 'job-ok'}>
+                  <span className="job-status" aria-hidden>
+                    {j.status === 'ok' ? '✓' : '✕'}
+                  </span>
+                  <span className="job-main">
+                    <span className="job-name">
+                      <span className="job-source">{jobSourceLabel(j.source)}</span> {j.name}
+                    </span>
+                    <span className="job-meta">
+                      {j.printerIp || '—'}
+                      {j.status === 'error' && j.error ? ` · ${j.error}` : ''}
+                    </span>
+                  </span>
+                  <span className="job-time">{formatTime(j.at)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
     </>
   )
+}
+
+function jobSourceLabel(source: JobLogEntry['source']): string {
+  return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : 'Test'
+}
+
+function formatTime(at: number): string {
+  return new Date(at).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
 }
