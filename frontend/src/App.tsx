@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useMirrorLoading } from 'shared-loading-indicator'
 import { useStorageBackedState } from 'use-storage-backed-state'
 import PrinterSelect, { type DiscoveredPrinter } from './PrinterSelect'
 import './App.css'
@@ -53,6 +54,10 @@ export default function App() {
   // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
   const [starredIp, setStarredIp] = useState('')
   const [testMsg, setTestMsg] = useState('')
+  const [testing, setTesting] = useState(false)
+
+  // Feed print activity into the shared top-edge loading indicator.
+  useMirrorLoading(status === 'loading' || testing)
   const [pageDragging, setPageDragging] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -114,6 +119,7 @@ export default function App() {
   // Print a text test receipt (name + IP) so the user can confirm which physical
   // device an IP belongs to.
   async function printTest(ip: string, name?: string) {
+    setTesting(true)
     setTestMsg(`Posílám testovací lístek na ${ip}…`)
     try {
       const res = await fetch(`${BACKEND_URL}/print-test`, {
@@ -125,10 +131,13 @@ export default function App() {
       setTestMsg(res.ok && d.ok ? `Testovací lístek odeslán na ${ip} ✓` : `Tisk na ${ip} selhal: ${d.error ?? 'chyba'}`)
     } catch {
       setTestMsg(`Nepodařilo se odeslat test na ${ip}`)
+    } finally {
+      setTesting(false)
     }
   }
 
   async function printTestAll() {
+    setTesting(true)
     setTestMsg('Posílám testovací lístek na všechny nalezené tiskárny…')
     try {
       const res = await fetch(`${BACKEND_URL}/print-test-all`, { method: 'POST' })
@@ -138,6 +147,8 @@ export default function App() {
       setTestMsg(`Testovací lístek odeslán na ${ok} z ${results.length} ${results.length === 1 ? 'tiskárny' : 'tiskáren'}`)
     } catch {
       setTestMsg('Nepodařilo se odeslat testy')
+    } finally {
+      setTesting(false)
     }
   }
 
