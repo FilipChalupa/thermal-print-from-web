@@ -1,0 +1,33 @@
+# Deployment that ALSO enables the driverless network printer
+# (AirPrint / IPP Everywhere), on top of the web UI.
+#
+# The key requirement is `network_mode: host`: mDNS/Bonjour discovery uses UDP
+# multicast (5353), which does not cross Docker's bridge network or routers.
+# Host networking lets the container share the host's LAN interface so clients
+# on the office network can discover the printer and the server can reach the
+# physical thermal printer on :9100.
+#
+# Use this as a "Docker Compose" resource in Coolify. The public domain keeps
+# pointing at the web port (PORT below); the IPP + mDNS traffic stays on the LAN.
+services:
+  thermal-print:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # REQUIRED for driverless discovery. Without it, mDNS/IPP never reach the LAN.
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      # Web UI / REST port (what Coolify's proxy should route the domain to).
+      PORT: "3000"
+      # IPP (virtual printer) port. Any free port works — it is advertised over
+      # mDNS, so clients find it regardless of the number.
+      IPP_PORT: "6310"
+      # Persist the starred target printer + the printer UUID across redeploys,
+      # so clients don't have to re-add the printer after each deploy.
+      THERMAL_CONFIG_PATH: /data/config.json
+    volumes:
+      - thermal-config:/data
+
+volumes:
+  thermal-config:
