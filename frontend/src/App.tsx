@@ -52,6 +52,7 @@ export default function App() {
   const [discovering, setDiscovering] = useState(false)
   // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
   const [starredIp, setStarredIp] = useState('')
+  const [testMsg, setTestMsg] = useState('')
   const [pageDragging, setPageDragging] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -109,6 +110,36 @@ export default function App() {
     if (pick) starIp(pick.ip)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discovered, starredIp])
+
+  // Print a text test receipt (name + IP) so the user can confirm which physical
+  // device an IP belongs to.
+  async function printTest(ip: string, name?: string) {
+    setTestMsg(`Posílám testovací lístek na ${ip}…`)
+    try {
+      const res = await fetch(`${BACKEND_URL}/print-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, name }),
+      })
+      const d = await res.json().catch(() => ({}))
+      setTestMsg(res.ok && d.ok ? `Testovací lístek odeslán na ${ip} ✓` : `Tisk na ${ip} selhal: ${d.error ?? 'chyba'}`)
+    } catch {
+      setTestMsg(`Nepodařilo se odeslat test na ${ip}`)
+    }
+  }
+
+  async function printTestAll() {
+    setTestMsg('Posílám testovací lístek na všechny nalezené tiskárny…')
+    try {
+      const res = await fetch(`${BACKEND_URL}/print-test-all`, { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      const results: { ok: boolean }[] = Array.isArray(d.results) ? d.results : []
+      const ok = results.filter((r) => r.ok).length
+      setTestMsg(`Testovací lístek odeslán na ${ok} z ${results.length} ${results.length === 1 ? 'tiskárny' : 'tiskáren'}`)
+    } catch {
+      setTestMsg('Nepodařilo se odeslat testy')
+    }
+  }
 
   function addFiles(files: FileList | File[]) {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'))
@@ -291,6 +322,8 @@ export default function App() {
               onRefresh={discoverPrinters}
               starredIp={starredIp}
               onStar={starIp}
+              onTest={printTest}
+              onTestAll={printTestAll}
             />
             <small className="system-target">
               {starredIp ? (
@@ -301,6 +334,7 @@ export default function App() {
                 <>Označ tiskárnu hvězdičkou — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
               )}
             </small>
+            {testMsg && <small className="test-msg">{testMsg}</small>}
           </label>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>

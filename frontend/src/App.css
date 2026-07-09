@@ -36,6 +36,11 @@ label {
   font-weight: 600;
 }
 
+.test-msg {
+  font-size: 0.8rem;
+  color: #0070f3;
+}
+
 /* --- Rich printer select --------------------------------------------------- */
 
 .printer-select {
@@ -43,7 +48,14 @@ label {
 }
 
 .ps-trigger {
-  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ps-trigger-open {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -57,8 +69,27 @@ label {
   transition: border-color 0.15s;
 }
 
-.ps-trigger:hover {
+.ps-trigger-open:hover {
   border-color: #0070f3;
+}
+
+.ps-trigger-star {
+  flex: 0 0 auto;
+  width: 44px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ps-trigger-star:hover {
+  border-color: #e6c200;
+  background: var(--bg);
+}
+
+.ps-trigger-star.is-starred {
+  background: rgba(230, 194, 0, 0.14);
+  border-color: #e6c200;
 }
 
 .ps-trigger-text {
@@ -78,10 +109,6 @@ label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.ps-star-badge {
-  color: #e6c200;
 }
 
 .ps-trigger-ip {
@@ -207,25 +234,60 @@ label {
   font-weight: 700;
 }
 
-.ps-star {
+.ps-icon-btn {
   flex: 0 0 auto;
   width: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ps-icon-btn:hover {
+  background: var(--code-bg);
+}
+
+.ps-star {
   color: #d9b300;
   font-size: 1.2rem;
   line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.ps-star:hover {
-  background: var(--code-bg);
 }
 
 .ps-star.is-starred {
   color: #e6c200;
+}
+
+.ps-test {
+  color: var(--text);
+}
+
+.ps-test:hover {
+  color: #0070f3;
+}
+
+.ps-testall {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: #0070f3;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ps-testall:hover {
+  background: var(--code-bg);
 }
 
 .ps-empty {

@@ -4,10 +4,22 @@ export interface DiscoveredPrinter {
   ip: string
   name?: string
   port: number
-  source: 'mdns' | 'scan'
+  source: 'mdns' | 'scan' | 'manual'
 }
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/
+
+// Printer glyph (feather "printer") — inline SVG so it renders everywhere and
+// follows the current text color in both light and dark themes.
+function PrinterIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 9V2h12v7" />
+      <path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+      <rect x="6" y="14" width="12" height="8" />
+    </svg>
+  )
+}
 
 interface Props {
   /** Currently selected IP (target of the manual web print). */
@@ -19,12 +31,39 @@ interface Props {
   /** IP that OS/system print jobs are forwarded to. */
   starredIp: string
   onStar: (ip: string) => void
+  /** Print a text test receipt to a single printer. */
+  onTest: (ip: string, name?: string) => void
+  /** Print a test receipt to every discovered printer. */
+  onTestAll: () => void
 }
 
-export default function PrinterSelect({ value, onChange, printers, discovering, onRefresh, starredIp, onStar }: Props) {
+export default function PrinterSelect({
+  value,
+  onChange,
+  printers,
+  discovering,
+  onRefresh,
+  starredIp,
+  onStar,
+  onTest,
+  onTestAll,
+}: Props) {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // Merge in the selected/starred IP when it isn't among the discovered ones, so
+  // a manually entered (and possibly starred) printer is still visible & pickable.
+  const options: DiscoveredPrinter[] = [...printers]
+  const known = new Set(printers.map((p) => p.ip))
+  for (const extraIp of [starredIp, value]) {
+    if (extraIp && IPV4.test(extraIp) && !known.has(extraIp)) {
+      known.add(extraIp)
+      options.push({ ip: extraIp, port: 9100, source: 'manual' })
+    }
+  }
+  const displayName = (p: DiscoveredPrinter) =>
+    p.name ?? (p.source === 'manual' ? 'Ručně zadaná tiskárna' : 'Termální tiskárna')
 
   useEffect(() => {
     if (!open) return
@@ -42,10 +81,9 @@ export default function PrinterSelect({ value, onChange, printers, discovering, 
     }
   }, [open])
 
-  const selected = printers.find((p) => p.ip === value)
-  const triggerLabel = selected?.name ?? (value || 'Vyber tiskárnu')
-  // Show the IP as a subtitle only when the main line is a friendly name.
-  const triggerSub = selected?.name ? value : ''
+  const selected = options.find((p) => p.ip === value)
+  const triggerLabel = selected ? displayName(selected) : value || 'Vyber tiskárnu'
+  const triggerSub = selected ? selected.ip : ''
 
   function applyManual() {
     const ip = manual.trim()
@@ -57,24 +95,34 @@ export default function PrinterSelect({ value, onChange, printers, discovering, 
 
   return (
     <div className="printer-select" ref={rootRef}>
-      <button
-        type="button"
-        className="ps-trigger"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className="ps-trigger-text">
-          <span className="ps-trigger-name">
-            {value && value === starredIp && <span className="ps-star-badge">★</span>}
-            {triggerLabel}
+      <div className="ps-trigger">
+        <button
+          type="button"
+          className="ps-trigger-open"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+        >
+          <span className="ps-trigger-text">
+            <span className="ps-trigger-name">{triggerLabel}</span>
+            {triggerSub && <span className="ps-trigger-ip">{triggerSub}</span>}
           </span>
-          {triggerSub && <span className="ps-trigger-ip">{triggerSub}</span>}
-        </span>
-        <span className={`ps-caret${open ? ' open' : ''}`} aria-hidden>
-          ▾
-        </span>
-      </button>
+          <span className={`ps-caret${open ? ' open' : ''}`} aria-hidden>
+            ▾
+          </span>
+        </button>
+        {IPV4.test(value) && (
+          <button
+            type="button"
+            className={`ps-star ps-trigger-star${value === starredIp ? ' is-starred' : ''}`}
+            onClick={() => onStar(value)}
+            title="Nastavit jako cíl systémového tisku (Cmd/Ctrl+P)"
+            aria-label="Nastavit vybranou tiskárnu jako cíl systémového tisku"
+          >
+            {value === starredIp ? '★' : '☆'}
+          </button>
+        )}
+      </div>
 
       {open && (
         <div className="ps-panel" role="listbox">
@@ -86,7 +134,7 @@ export default function PrinterSelect({ value, onChange, printers, discovering, 
           </div>
 
           <ul className="ps-list">
-            {printers.map((p) => {
+            {options.map((p) => {
               const isSelected = p.ip === value
               const isStarred = p.ip === starredIp
               return (
@@ -102,14 +150,23 @@ export default function PrinterSelect({ value, onChange, printers, discovering, 
                     }}
                   >
                     <span className="ps-option-main">
-                      <span className="ps-name">{p.name ?? 'Termální tiskárna'}</span>
+                      <span className="ps-name">{displayName(p)}</span>
                       <span className="ps-ip">{p.ip}</span>
                     </span>
                     {isSelected && <span className="ps-check" aria-hidden>✓</span>}
                   </button>
                   <button
                     type="button"
-                    className={`ps-star${isStarred ? ' is-starred' : ''}`}
+                    className="ps-icon-btn ps-test"
+                    onClick={() => onTest(p.ip, p.name)}
+                    title="Vytisknout testovací lístek (název + IP)"
+                    aria-label={`Vytisknout testovací lístek na ${p.ip}`}
+                  >
+                    <PrinterIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className={`ps-icon-btn ps-star${isStarred ? ' is-starred' : ''}`}
                     onClick={() => onStar(p.ip)}
                     title="Nastavit jako cíl systémového tisku (Cmd/Ctrl+P)"
                     aria-label={`Nastavit ${p.ip} jako cíl systémového tisku`}
@@ -119,10 +176,16 @@ export default function PrinterSelect({ value, onChange, printers, discovering, 
                 </li>
               )
             })}
-            {printers.length === 0 && (
+            {options.length === 0 && (
               <li className="ps-empty">{discovering ? 'Hledám tiskárny…' : 'Žádná tiskárna nenalezena'}</li>
             )}
           </ul>
+
+          {options.length > 0 && (
+            <button type="button" className="ps-testall" onClick={onTestAll}>
+              <PrinterIcon /> Otestovat všechny tiskárny
+            </button>
+          )}
 
           <div className="ps-manual">
             <input

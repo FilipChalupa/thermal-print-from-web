@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/print': 'http://localhost:3000',
+      '/print-test': 'http://localhost:3000',
+      '/print-test-all': 'http://localhost:3000',
       '/config': 'http://localhost:3000',
       '/discover': 'http://localhost:3000',
     },

@@ -1,4 +1,5 @@
 import { Canvas, Image, ImageData, loadImage } from 'skia-canvas'
+import iconv from 'iconv-lite'
 import * as net from 'net'
 import type { RasterPage } from './ipp/pwg-raster.js'
 
@@ -144,4 +145,39 @@ export async function printRasterPages(host: string, pages: RasterPage[], copies
     chunks.push(...rasterPageToEscPos(page))
   }
   await sendCopies(host, chunks, copies)
+}
+
+/**
+ * Print a small text test receipt (printer name + IP + timestamp) so the user can
+ * confirm a discovered device is really the intended thermal printer. Text is
+ * encoded as CP852 for Czech characters.
+ */
+export async function printTestReceipt(host: string, name: string, ip: string): Promise<void> {
+  const cp852 = (s: string) => iconv.encode(s, 'CP852')
+  const DOUBLE = Buffer.from([0x1b, 0x21, 0x30]) // ESC ! — double width + height
+  const NORMAL = Buffer.from([0x1b, 0x21, 0x00])
+  const BOLD_ON = Buffer.from([0x1b, 0x45, 1])
+  const BOLD_OFF = Buffer.from([0x1b, 0x45, 0])
+  const NL = Buffer.from([0x0a])
+
+  const payload: Buffer[] = [
+    INIT,
+    CENTER_ALIGN,
+    DOUBLE,
+    cp852('TEST'),
+    NL,
+    NORMAL,
+    NL,
+    BOLD_ON,
+    cp852(name),
+    BOLD_OFF,
+    NL,
+    cp852(ip),
+    NL,
+    cp852(new Date().toLocaleString('cs-CZ')),
+    NL,
+    FEED,
+    CUT,
+  ]
+  await socketWrite(host, PRINTER_PORT, payload)
 }

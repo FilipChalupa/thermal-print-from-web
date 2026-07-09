@@ -9,7 +9,7 @@ import { getConfig, setConfig } from './config.js'
 import { discoverPrinters, pickDefaultPrinter } from './discovery.js'
 import { startIppHttpServer } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
-import { printImage } from './printer.js'
+import { printImage, printTestReceipt } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const publicDir = join(__dirname, '..', 'public')
@@ -87,6 +87,35 @@ app.get('/discover', async (c) => {
     console.error('Discovery selhalo:', err)
     return c.json({ printers: [] })
   }
+})
+
+// Print a text test receipt (name + IP) to a single printer.
+app.post('/print-test', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
+  const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Termální tiskárna'
+  if (!ip) return c.json({ error: 'IP je povinná' }, 400)
+  try {
+    await printTestReceipt(ip, name, ip)
+    return c.json({ ok: true })
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
+  }
+})
+
+// Print a test receipt to every discovered printer.
+app.post('/print-test-all', async (c) => {
+  const printers = await discoverPrinters()
+  const results = []
+  for (const p of printers) {
+    try {
+      await printTestReceipt(p.ip, p.name ?? 'Termální tiskárna', p.ip)
+      results.push({ ip: p.ip, ok: true })
+    } catch (err) {
+      results.push({ ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' })
+    }
+  }
+  return c.json({ results })
 })
 
 app.use('/*', serveStatic({ root: publicDir }))
