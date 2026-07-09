@@ -127,6 +127,15 @@ function browseMdns(): Promise<DiscoveredPrinter[]> {
 	})
 }
 
+/**
+ * Choose the best default among discovered printers: prefer one that advertised
+ * itself over mDNS (almost certainly a real printer, and it carries a name) over
+ * a bare open-9100 host from the sweep.
+ */
+export function pickDefaultPrinter(printers: DiscoveredPrinter[]): DiscoveredPrinter | undefined {
+	return printers.find((p) => p.source === 'mdns') ?? printers[0]
+}
+
 let cache: { at: number; result: DiscoveredPrinter[] } | null = null
 const CACHE_MS = 8000
 

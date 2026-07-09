@@ -22,146 +22,257 @@ label {
   gap: 6px;
   font-size: 0.9rem;
   font-weight: 500;
-  color: #555;
-}
-
-.label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.discover-btn {
-  font-size: 0.8rem;
-  font-weight: 500;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fff;
-  color: #0070f3;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, opacity 0.2s;
-}
-
-.discover-btn:hover:not(:disabled) {
-  border-color: #0070f3;
-}
-
-.discover-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.discover-hint {
-  font-weight: 400;
-  color: #888;
-  font-size: 0.8rem;
-}
-
-.ip-row {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.ip-row input[type='text'] {
-  flex: 1;
-}
-
-.star-btn {
-  flex: 0 0 auto;
-  width: 44px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fff;
-  color: #c9a100;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
-}
-
-.star-btn:hover:not(:disabled) {
-  border-color: #c9a100;
-}
-
-.star-btn.is-starred {
-  background: #fff7d6;
-  border-color: #e6c200;
-}
-
-.star-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
+  color: var(--text);
 }
 
 .system-target {
   font-weight: 400;
-  color: #666;
+  color: var(--text);
   font-size: 0.8rem;
 }
 
 .system-target strong {
-  color: #333;
+  color: var(--text-h);
   font-weight: 600;
 }
 
-.printer-list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* --- Rich printer select --------------------------------------------------- */
+
+.printer-select {
+  position: relative;
 }
 
-.printer-list li {
+.ps-trigger {
+  width: 100%;
   display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.printer-list li.starred .printer-pick {
-  border-color: #e6c200;
-  background: #fffdf3;
-}
-
-.printer-pick {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-  padding: 8px 12px;
-  border: 1px solid #e0e0e0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--bg);
+  color: var(--text-h);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+  transition: border-color 0.15s;
 }
 
-.printer-pick:hover {
+.ps-trigger:hover {
   border-color: #0070f3;
 }
 
-.printer-name {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: #333;
+.ps-trigger-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
-.printer-ip {
+.ps-trigger-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ps-star-badge {
+  color: #e6c200;
+}
+
+.ps-trigger-ip {
   font-size: 0.8rem;
-  color: #888;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.ps-caret {
+  color: var(--text);
+  transition: transform 0.15s;
+}
+
+.ps-caret.open {
+  transform: rotate(180deg);
+}
+
+.ps-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.ps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.ps-refresh {
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: #0070f3;
+  cursor: pointer;
+}
+
+.ps-refresh:hover:not(:disabled) {
+  border-color: #0070f3;
+}
+
+.ps-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ps-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ps-list li {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 6px;
+}
+
+.ps-list li.starred {
+  background: rgba(230, 194, 0, 0.12);
+}
+
+.ps-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ps-option:hover {
+  background: var(--code-bg);
+}
+
+.ps-option-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ps-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.ps-ip {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.ps-check {
+  color: #0070f3;
+  font-weight: 700;
+}
+
+.ps-star {
+  flex: 0 0 auto;
+  width: 40px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: #d9b300;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ps-star:hover {
+  background: var(--code-bg);
+}
+
+.ps-star.is-starred {
+  color: #e6c200;
+}
+
+.ps-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.ps-manual {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ps-manual input[type='text'] {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+.ps-manual-apply {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: #0070f3;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ps-manual-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 input[type='text'],
 input[type='number'] {
   padding: 10px 12px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 1rem;
+  background: var(--bg);
+  color: var(--text-h);
   transition: border-color 0.2s;
 }
 

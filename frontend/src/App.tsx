@@ -1,8 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStorageBackedState } from 'use-storage-backed-state'
+import PrinterSelect, { type DiscoveredPrinter } from './PrinterSelect'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
+const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/
+
+// Czech pluralization: [1, 2–4, 5+ / 0]. e.g. czPlural(2, ['fotka','fotky','fotek'])
+function czPlural(n: number, forms: [string, string, string]): string {
+  if (n === 1) return forms[0]
+  if (n >= 2 && n <= 4) return forms[1]
+  return forms[2]
+}
 
 interface ImageItem {
   file: File
@@ -14,13 +23,6 @@ interface PrintProgress {
   current: number
   total: number
   name: string
-}
-
-interface DiscoveredPrinter {
-  ip: string
-  name?: string
-  port: number
-  source: 'mdns' | 'scan'
 }
 
 async function applyRotation(file: File, degrees: number): Promise<Blob> {
@@ -98,6 +100,15 @@ export default function App() {
     discoverPrinters()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-star the first discovered printer (preferring mDNS ones) as the system
+  // print target when nothing is starred yet. Never overrides a manual choice.
+  useEffect(() => {
+    if (starredIp || discovered.length === 0) return
+    const pick = discovered.find((p) => p.source === 'mdns') ?? discovered[0]
+    if (pick) starIp(pick.ip)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discovered, starredIp])
 
   function addFiles(files: FileList | File[]) {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'))
@@ -201,7 +212,7 @@ export default function App() {
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (!ip || items.length === 0) return
+    if (!IPV4.test(ip) || items.length === 0) return
 
     setStatus('loading')
     setErrorMsg('')
@@ -271,81 +282,25 @@ export default function App() {
         <h1>Tisk na Epson</h1>
         <form onSubmit={handleSubmit}>
           <label>
-            <span className="label-row">
-              IP adresa tiskárny
-              <button
-                type="button"
-                className="discover-btn"
-                onClick={discoverPrinters}
-                disabled={discovering}
-                title="Vyhledat tiskárny v síti"
-              >
-                {discovering ? 'Hledám…' : '↻ Vyhledat'}
-              </button>
-            </span>
-            <div className="ip-row">
-              <input
-                type="text"
-                name="printer-ip"
-                list="printer-suggestions"
-                autoComplete="on"
-                value={ip}
-                onChange={(e) => setIp(e.target.value)}
-                placeholder="192.168.1.100"
-                required
-                pattern="^(\d{1,3}\.){3}\d{1,3}$"
-                title="Zadejte platnou IPv4 adresu"
-              />
-              <button
-                type="button"
-                className={`star-btn${ip && ip === starredIp ? ' is-starred' : ''}`}
-                onClick={() => starIp(ip)}
-                disabled={!ip}
-                title="Nastavit jako cíl systémového tisku (Cmd/Ctrl+P)"
-                aria-label="Nastavit jako cíl systémového tisku"
-              >
-                {ip && ip === starredIp ? '★' : '☆'}
-              </button>
-            </div>
-            <datalist id="printer-suggestions">
-              {discovered.map((p) => (
-                <option key={p.ip} value={p.ip}>
-                  {p.name ? `${p.name} (${p.ip})` : p.ip}
-                </option>
-              ))}
-            </datalist>
-
+            IP adresa tiskárny
+            <PrinterSelect
+              value={ip}
+              onChange={setIp}
+              printers={discovered}
+              discovering={discovering}
+              onRefresh={discoverPrinters}
+              starredIp={starredIp}
+              onStar={starIp}
+            />
             <small className="system-target">
               {starredIp ? (
                 <>
                   Systémový tisk (Cmd/Ctrl+P) míří na <strong>★ {starredLabel}</strong>
                 </>
               ) : (
-                <>Zahvězdičkuj tiskárnu níže — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
+                <>Označ tiskárnu hvězdičkou — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
               )}
             </small>
-
-            {discovered.length > 0 && (
-              <ul className="printer-list">
-                {discovered.map((p) => (
-                  <li key={p.ip} className={p.ip === starredIp ? 'starred' : ''}>
-                    <button type="button" className="printer-pick" onClick={() => setIp(p.ip)}>
-                      <span className="printer-name">{p.name ?? 'Termální tiskárna'}</span>
-                      <span className="printer-ip">{p.ip}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`star-btn${p.ip === starredIp ? ' is-starred' : ''}`}
-                      onClick={() => starIp(p.ip)}
-                      title="Nastavit jako cíl systémového tisku"
-                      aria-label={`Nastavit ${p.ip} jako cíl systémového tisku`}
-                    >
-                      {p.ip === starredIp ? '★' : '☆'}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </label>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
@@ -414,12 +369,12 @@ export default function App() {
             />
           </label>
 
-          <button type="submit" disabled={status === 'loading' || items.length === 0}>
+          <button type="submit" disabled={status === 'loading' || items.length === 0 || !IPV4.test(ip)}>
             {status === 'loading'
               ? progress
                 ? `Tisknu ${progress.current}/${progress.total}…`
                 : 'Připravuji…'
-              : `Tisknout${items.length > 1 ? ` (${items.length} fotek)` : ''}`}
+              : `Tisknout${items.length > 1 ? ` (${items.length} ${czPlural(items.length, ['fotka', 'fotky', 'fotek'])})` : ''}`}
           </button>
         </form>
 

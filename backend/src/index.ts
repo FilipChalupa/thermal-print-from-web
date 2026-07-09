@@ -6,7 +6,7 @@ import { stream } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { getConfig, setConfig } from './config.js'
-import { discoverPrinters } from './discovery.js'
+import { discoverPrinters, pickDefaultPrinter } from './discovery.js'
 import { startIppHttpServer } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import { printImage } from './printer.js'
@@ -99,6 +99,26 @@ export interface ServerHandle {
   ippPort?: number
 }
 
+/**
+ * Run discovery in the background as soon as the server boots — ideally before
+ * the user ever opens the web UI — so suggestions are ready instantly, and
+ * auto-select the first printer found as the system-print target when none is
+ * configured yet. Never overrides an existing choice.
+ */
+async function autoConfigurePrinter(): Promise<void> {
+  try {
+    const printers = await discoverPrinters()
+    if (getConfig().printerIp) return
+    const pick = pickDefaultPrinter(printers)
+    if (pick) {
+      setConfig({ printerIp: pick.ip })
+      console.log(`Automaticky vybrána tiskárna pro systémový tisk: ${pick.name ?? pick.ip} (${pick.ip})`)
+    }
+  } catch (err) {
+    console.error('Automatická volba tiskárny selhala:', err)
+  }
+}
+
 export function startServer(
   options: { port?: number; hostname?: string; ipp?: boolean; ippPort?: number } = {},
 ): Promise<ServerHandle> {
@@ -111,6 +131,9 @@ export function startServer(
       hostname: options.hostname,
     }, async (info) => {
       console.log(`Server is running on http://localhost:${info.port}`)
+
+      // Warm discovery + auto-select a target in the background (non-blocking).
+      void autoConfigurePrinter()
 
       if (!enableIpp) {
         resolve({ port: info.port })
