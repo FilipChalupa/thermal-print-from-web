@@ -25,6 +25,40 @@ label {
   color: #555;
 }
 
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.discover-btn {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #0070f3;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.discover-btn:hover:not(:disabled) {
+  border-color: #0070f3;
+}
+
+.discover-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.discover-hint {
+  font-weight: 400;
+  color: #888;
+  font-size: 0.8rem;
+}
+
 input[type='text'],
 input[type='number'] {
   padding: 10px 12px;

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.13",
+    "bonjour-service": "^1.4.2",
     "hono": "^4.12.12",
     "iconv-lite": "^0.7.2",
     "skia-canvas": "^3.0.8"

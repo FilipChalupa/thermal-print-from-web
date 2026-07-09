@@ -1,7 +1,9 @@
-import { Canvas, loadImage } from 'skia-canvas'
+import { Canvas, Image, ImageData, loadImage } from 'skia-canvas'
 import * as net from 'net'
+import type { RasterPage } from './ipp/pwg-raster.js'
 
 const DOTS_PER_LINE = 576
+export const PRINT_WIDTH_DOTS = DOTS_PER_LINE
 
 function dither(imageData: Uint8ClampedArray, width: number, height: number): Uint8Array {
   const pixels = new Float32Array(width * height)
@@ -46,16 +48,19 @@ function dither(imageData: Uint8ClampedArray, width: number, height: number): Ui
   return result
 }
 
-async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
-  const img = await loadImage(imageBuffer)
-
+/**
+ * Scale any drawable (a decoded image or a raster page rendered onto a Canvas)
+ * to the printer width, Floyd–Steinberg dither it and emit ESC/POS raster
+ * (`GS v 0`) chunks.
+ */
+function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: number): Buffer[] {
   const printWidth = DOTS_PER_LINE
-  const scale = printWidth / img.width
-  const printHeight = Math.round(img.height * scale)
+  const scale = printWidth / srcWidth
+  const printHeight = Math.max(1, Math.round(srcHeight * scale))
 
   const canvas = new Canvas(printWidth, printHeight)
   const ctx = canvas.getContext('2d')
-  ctx.drawImage(img, 0, 0, printWidth, printHeight)
+  ctx.drawImage(source, 0, 0, printWidth, printHeight)
   const imageData = ctx.getImageData(0, 0, printWidth, printHeight)
 
   const bits = dither(imageData.data as Uint8ClampedArray, printWidth, printHeight)
@@ -79,6 +84,18 @@ async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
   return buffers
 }
 
+async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
+  const img = await loadImage(imageBuffer)
+  return drawableToEscPos(img, img.width, img.height)
+}
+
+function rasterPageToEscPos(page: RasterPage): Buffer[] {
+  const canvas = new Canvas(page.width, page.height)
+  const ctx = canvas.getContext('2d')
+  ctx.putImageData(new ImageData(page.rgba, page.width, page.height), 0, 0)
+  return drawableToEscPos(canvas, page.width, page.height)
+}
+
 function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port }, () => {
@@ -98,21 +115,33 @@ function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> 
   })
 }
 
-export async function printImage(host: string, imageBuffer: Buffer, copies: number): Promise<void> {
-  const PORT = 9100
+const PRINTER_PORT = 9100
+const INIT = Buffer.from([0x1b, 0x40]) // Initialize printer
+const CENTER_ALIGN = Buffer.from([0x1b, 0x61, 1]) // Center alignment
+const FEED = Buffer.from([0x1b, 0x64, 6]) // Feed 6 lines before cut
+const CUT = Buffer.from([0x1b, 0x69]) // Full cut
 
-  const init = Buffer.from([0x1b, 0x40])            // Initialize printer
-  const centerAlign = Buffer.from([0x1b, 0x61, 1])  // Center alignment
-  const feed = Buffer.from([0x1b, 0x64, 6])          // Feed 6 lines before cut
-  const cut = Buffer.from([0x1b, 0x69])              // Full cut
-
-  const imageChunks = await imageToEscPos(imageBuffer)
-
-  const payload: Buffer[] = []
-  payload.push(init, centerAlign)
+/** Wrap already-rendered ESC/POS raster chunks with init/cut and send `copies` times. */
+async function sendCopies(host: string, chunks: Buffer[], copies: number): Promise<void> {
+  const payload: Buffer[] = [INIT, CENTER_ALIGN]
   for (let i = 0; i < copies; i++) {
-    payload.push(...imageChunks, feed, cut)
+    payload.push(...chunks, FEED, CUT)
   }
+  await socketWrite(host, PRINTER_PORT, payload)
+}
 
-  await socketWrite(host, PORT, payload)
+export async function printImage(host: string, imageBuffer: Buffer, copies: number): Promise<void> {
+  await sendCopies(host, await imageToEscPos(imageBuffer), copies)
+}
+
+/**
+ * Print decoded raster pages (from a driverless IPP job). All pages are rendered
+ * back-to-back and the whole document is cut once per copy.
+ */
+export async function printRasterPages(host: string, pages: RasterPage[], copies: number): Promise<void> {
+  const chunks: Buffer[] = []
+  for (const page of pages) {
+    chunks.push(...rasterPageToEscPos(page))
+  }
+  await sendCopies(host, chunks, copies)
 }

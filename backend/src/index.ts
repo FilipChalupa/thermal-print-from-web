@@ -5,6 +5,10 @@ import { cors } from 'hono/cors'
 import { stream } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
+import { getConfig, setConfig } from './config.js'
+import { discoverPrinters } from './discovery.js'
+import { startIppHttpServer } from './ipp/http.js'
+import { startMdns } from './ipp/mdns.js'
 import { printImage } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -58,18 +62,71 @@ app.post('/print', async (c) => {
   })
 })
 
+// Configuration for the virtual (driverless) printer: the target thermal
+// printer IP and the advertised name. Used by IPP jobs, which carry no IP.
+app.get('/config', (c) => {
+  const cfg = getConfig()
+  return c.json({ printerIp: cfg.printerIp, printerName: cfg.printerName })
+})
+
+app.post('/config', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const patch: { printerIp?: string; printerName?: string } = {}
+  if (typeof body.printerIp === 'string') patch.printerIp = body.printerIp.trim()
+  if (typeof body.printerName === 'string' && body.printerName.trim()) patch.printerName = body.printerName.trim()
+  const cfg = setConfig(patch)
+  return c.json({ printerIp: cfg.printerIp, printerName: cfg.printerName })
+})
+
+// Auto-discovery of nearby thermal printers (mDNS + port-9100 sweep) to power
+// IP-address suggestions in the UI.
+app.get('/discover', async (c) => {
+  try {
+    return c.json({ printers: await discoverPrinters() })
+  } catch (err) {
+    console.error('Discovery selhalo:', err)
+    return c.json({ printers: [] })
+  }
+})
+
 app.use('/*', serveStatic({ root: publicDir }))
 app.use('/*', serveStatic({ path: join(publicDir, 'index.html') }))
 
-export function startServer(options: { port?: number; hostname?: string } = {}): Promise<{ port: number }> {
+export interface ServerHandle {
+  /** Port of the web UI / REST server. */
+  port: number
+  /** Port of the LAN-facing IPP (virtual printer) server, if enabled. */
+  ippPort?: number
+}
+
+export function startServer(
+  options: { port?: number; hostname?: string; ipp?: boolean; ippPort?: number } = {},
+): Promise<ServerHandle> {
+  const enableIpp = options.ipp ?? true
+
   return new Promise((resolve) => {
     serve({
       fetch: app.fetch,
       port: options.port ?? 3000,
       hostname: options.hostname,
-    }, (info) => {
+    }, async (info) => {
       console.log(`Server is running on http://localhost:${info.port}`)
-      resolve({ port: info.port })
+
+      if (!enableIpp) {
+        resolve({ port: info.port })
+        return
+      }
+
+      // The virtual printer must be reachable from the whole LAN, so it always
+      // binds to 0.0.0.0 regardless of how the web UI is bound.
+      try {
+        const ipp = await startIppHttpServer({ port: options.ippPort ?? (Number(process.env.IPP_PORT) || 6310) })
+        startMdns({ port: ipp.port })
+        resolve({ port: info.port, ippPort: ipp.port })
+      } catch (err) {
+        console.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
+        resolve({ port: info.port })
+      }
     })
   })
 }

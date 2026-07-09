@@ -16,6 +16,13 @@ interface PrintProgress {
   name: string
 }
 
+interface DiscoveredPrinter {
+  ip: string
+  name?: string
+  port: number
+  source: 'mdns' | 'scan'
+}
+
 async function applyRotation(file: File, degrees: number): Promise<Blob> {
   if (degrees === 0) return file
   const img = await createImageBitmap(file)
@@ -39,12 +46,58 @@ export default function App() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [progress, setProgress] = useState<PrintProgress | null>(null)
+  const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([])
+  const [discovering, setDiscovering] = useState(false)
   const [pageDragging, setPageDragging] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounter = useRef(0)
   const isReordering = useRef(false)
   const reorderDragIndex = useRef<number | null>(null)
+
+  // Hydrate the IP from the backend config on first load (used by the network
+  // "driverless printer" path), falling back to whatever is stored locally.
+  const hydratedFromBackend = useRef(false)
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/config`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cfg?.printerIp && !ip) setIp(cfg.printerIp)
+      })
+      .catch(() => {})
+      .finally(() => {
+        hydratedFromBackend.current = true
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Keep the backend config in sync so IPP jobs (which carry no IP) know where
+  // to forward. Debounced to avoid a request per keystroke.
+  useEffect(() => {
+    if (!hydratedFromBackend.current) return
+    const id = setTimeout(() => {
+      fetch(`${BACKEND_URL}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printerIp: ip }),
+      }).catch(() => {})
+    }, 500)
+    return () => clearTimeout(id)
+  }, [ip])
+
+  // Auto-discover thermal printers on the LAN to suggest IP addresses.
+  function discoverPrinters() {
+    setDiscovering(true)
+    fetch(`${BACKEND_URL}/discover`)
+      .then((r) => (r.ok ? r.json() : { printers: [] }))
+      .then((d) => setDiscovered(Array.isArray(d.printers) ? d.printers : []))
+      .catch(() => {})
+      .finally(() => setDiscovering(false))
+  }
+  useEffect(() => {
+    discoverPrinters()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function addFiles(files: FileList | File[]) {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'))
@@ -213,10 +266,22 @@ export default function App() {
         <h1>Tisk na Epson</h1>
         <form onSubmit={handleSubmit}>
           <label>
-            IP adresa tiskárny
+            <span className="label-row">
+              IP adresa tiskárny
+              <button
+                type="button"
+                className="discover-btn"
+                onClick={discoverPrinters}
+                disabled={discovering}
+                title="Vyhledat tiskárny v síti"
+              >
+                {discovering ? 'Hledám…' : '↻ Vyhledat'}
+              </button>
+            </span>
             <input
               type="text"
               name="printer-ip"
+              list="printer-suggestions"
               autoComplete="on"
               value={ip}
               onChange={(e) => setIp(e.target.value)}
@@ -225,6 +290,16 @@ export default function App() {
               pattern="^(\d{1,3}\.){3}\d{1,3}$"
               title="Zadejte platnou IPv4 adresu"
             />
+            <datalist id="printer-suggestions">
+              {discovered.map((p) => (
+                <option key={p.ip} value={p.ip}>
+                  {p.name ? `${p.name} (${p.ip})` : p.ip}
+                </option>
+              ))}
+            </datalist>
+            {discovered.length > 0 && (
+              <small className="discover-hint">Nalezeno {discovered.length} zařízení v síti</small>
+            )}
           </label>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>

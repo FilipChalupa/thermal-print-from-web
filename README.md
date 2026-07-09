@@ -14,6 +14,25 @@ Webová aplikace pro tisk obrázků na termální tiskárně Epson přes ESC/POS
 - Nahrání obrázku s náhledem
 - Volitelný počet výtisků (výchozí 1), po každém výtisku automatický cut
 
+## Síťová tiskárna bez ovladačů (AirPrint / IPP Everywhere)
+
+Kromě webu se aplikace v lokální síti tváří jako **běžná tiskárna**, takže jde tisknout z jakékoli aplikace přes `Cmd/Ctrl+P` — bez instalace ovladače na Windows, macOS i Linuxu.
+
+Jak to funguje:
+
+- Server se ohlašuje přes **mDNS/Bonjour** (`_ipp._tcp`, včetně AirPrint subtypu `_universal`), takže ho OS sám najde a nabídne přidání.
+- Implementuje **IPP** server (RFC 8011 + IPP Everywhere): `Get-Printer-Attributes`, `Validate-Job`, `Print-Job`, `Create-Job`/`Send-Document`, `Get-Jobs`, `Cancel-Job`.
+- OS pošle stránku jako **PWG Raster** (`image/pwg-raster`) nebo **Apple Raster / URF** (`image/urf`). Ta se dekóduje, přeškáluje na šířku tiskárny (576 dotů / 80 mm role, 203 dpi), Floyd–Steinberg dither a odešle jako ESC/POS na fyzickou tiskárnu.
+
+Cíl (IP fyzické termální tiskárny) se nastaví jednou ve webovém UI (pole *IP adresa tiskárny*) — uloží se do konfigurace serveru a použije se pro všechny síťové tisky. Pole IP navíc **automaticky napovídá** tiskárny nalezené v síti (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24); rozsah skenu lze přebít přes `THERMAL_DISCOVERY_HOSTS`. Konfigurace se ukládá do `~/.thermal-print-config.json` (lze změnit přes `THERMAL_CONFIG_PATH`).
+
+Relevantní proměnné prostředí:
+
+- `IPP_PORT` — port IPP serveru (výchozí `6310`; do sítě se stejně ohlašuje přes mDNS, takže na konkrétní hodnotě nezáleží)
+- `PRINTER_IP`, `PRINTER_NAME` — výchozí cílová IP a jméno tiskárny v síti
+
+> Při prvním spuštění může Windows/macOS firewall vyžádat povolení příchozích spojení (IPP port + mDNS). IPP server naslouchá na `0.0.0.0`, samotné webové UI zůstává jen na loopbacku.
+
 ## Požadavky
 
 - Node.js 22+
