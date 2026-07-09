@@ -8,6 +8,11 @@ import { join } from 'path'
  * from the form on every request), driverless IPP jobs arrive with no IP, so the
  * destination thermal printer must be configured once and remembered.
  */
+export interface SavedPrinter {
+	ip: string
+	name: string
+}
+
 export interface Config {
 	/** IP of the physical ESC/POS thermal printer to forward jobs to. */
 	printerIp: string
@@ -15,6 +20,15 @@ export interface Config {
 	printerName: string
 	/** Stable UUID advertised over IPP so clients recognise the same printer. */
 	printerUuid: string
+	/** Print width in dots: 576 for 80 mm paper, 384 for 58 mm (both @ 203 dpi). */
+	paperWidthDots: number
+	/** User-saved / renamed printers, kept across reloads even if not rediscovered. */
+	printers: SavedPrinter[]
+}
+
+/** Physical paper width (hundredths of mm) advertised over IPP, per print width. */
+export function paperWidthHmm(dots: number): number {
+	return dots <= 384 ? 5800 : 8000 // 58 mm vs 80 mm
 }
 
 const CONFIG_PATH = process.env.THERMAL_CONFIG_PATH || join(homedir(), '.thermal-print-config.json')
@@ -23,6 +37,8 @@ const defaults: Config = {
 	printerIp: process.env.PRINTER_IP || '',
 	printerName: process.env.PRINTER_NAME || 'Thermal Printer',
 	printerUuid: '',
+	paperWidthDots: Number(process.env.PAPER_WIDTH_DOTS) || 576,
+	printers: [],
 }
 
 let cache: Config | null = null
@@ -50,4 +66,16 @@ export function setConfig(patch: Partial<Config>): Config {
 		console.error(`Nepodařilo se uložit konfiguraci do ${CONFIG_PATH}:`, err)
 	}
 	return next
+}
+
+/** Add or rename a saved printer (keyed by IP). */
+export function upsertPrinter(ip: string, name: string): SavedPrinter[] {
+	const printers = getConfig().printers.filter((p) => p.ip !== ip)
+	printers.push({ ip, name })
+	printers.sort((a, b) => a.name.localeCompare(b.name))
+	return setConfig({ printers }).printers
+}
+
+export function removePrinter(ip: string): SavedPrinter[] {
+	return setConfig({ printers: getConfig().printers.filter((p) => p.ip !== ip) }).printers
 }

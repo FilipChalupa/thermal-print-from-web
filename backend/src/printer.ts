@@ -1,10 +1,17 @@
 import { Canvas, Image, ImageData, loadImage } from 'skia-canvas'
 import iconv from 'iconv-lite'
 import * as net from 'net'
+import { getConfig } from './config.js'
 import type { RasterPage } from './ipp/pwg-raster.js'
 
 const DOTS_PER_LINE = 576
 export const PRINT_WIDTH_DOTS = DOTS_PER_LINE
+
+/** Configured print width in dots (576 = 80 mm, 384 = 58 mm), rounded to a byte. */
+function printWidthDots(): number {
+  const dots = getConfig().paperWidthDots || DOTS_PER_LINE
+  return Math.max(8, Math.round(dots / 8) * 8)
+}
 
 function dither(imageData: Uint8ClampedArray, width: number, height: number): Uint8Array {
   const pixels = new Float32Array(width * height)
@@ -55,7 +62,7 @@ function dither(imageData: Uint8ClampedArray, width: number, height: number): Ui
  * (`GS v 0`) chunks.
  */
 function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: number): Buffer[] {
-  const printWidth = DOTS_PER_LINE
+  const printWidth = printWidthDots()
   const scale = printWidth / srcWidth
   const printHeight = Math.max(1, Math.round(srcHeight * scale))
 

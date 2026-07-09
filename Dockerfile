@@ -26,4 +26,9 @@ EXPOSE 3000
 EXPOSE 6310
 # mDNS / Bonjour discovery (multicast)
 EXPOSE 5353/udp
+
+# Liveness: the web server answers /health once it is up.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q --spider "http://127.0.0.1:${PORT:-3000}/health" || exit 1
+
 CMD ["node", "dist/index.js"]

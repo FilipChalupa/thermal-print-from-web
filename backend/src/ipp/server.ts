@@ -4,10 +4,12 @@
  * fetch its capabilities and submit raster jobs — which we decode and forward to
  * the physical thermal printer as ESC/POS.
  */
-import { getConfig } from '../config.js'
+import { getConfig, paperWidthHmm } from '../config.js'
+import { logJob } from '../jobs-log.js'
 import { printRasterPages } from '../printer.js'
 import { attr, decode, encode, findAttr, GroupTag, ValueTag } from './encoding.js'
 import type { IppAttribute, IppGroup, IppMessage } from './encoding.js'
+import { renderPdfToPages } from './pdf.js'
 import { decodeRaster } from './pwg-raster.js'
 
 // IPP operation ids we handle.
@@ -35,11 +37,9 @@ const Status = {
 const DPI = 203
 
 /** Document formats we accept, shared with the mDNS `pdl` TXT record. */
-export const PDL_SUPPORTED = ['image/urf', 'image/pwg-raster', 'application/octet-stream']
+export const PDL_SUPPORTED = ['image/urf', 'image/pwg-raster', 'application/pdf', 'application/octet-stream']
 export const MAKE_AND_MODEL = 'Thermal Printer (ESC/POS bridge)'
-const MEDIA_WIDTH_HMM = 8000 // 80 mm in hundredths of a millimetre
 const MEDIA_HEIGHT_HMM = 29700 // 297 mm default page length
-const MEDIA_NAME = 'om_80x297mm_80x297mm'
 
 type JobState = 3 | 5 | 7 | 8 | 9 // pending | processing | canceled | aborted | completed
 
@@ -48,7 +48,14 @@ interface Job {
 	state: JobState
 	name: string
 	createdAt: number
+	copies: number
 	document: Buffer
+}
+
+function readCopies(req: IppMessage): number {
+	const v = findAttr(req, GroupTag.job, 'copies')?.value
+	const n = typeof v === 'number' ? v : 1
+	return Math.max(1, Math.min(99, n))
 }
 
 const jobs = new Map<number, Job>()
@@ -64,7 +71,7 @@ function uptime(): number {
 /** URF is Apple's capability string; required for AirPrint on macOS/iOS. */
 export const URF_SUPPORTED = ['V1.4', 'CP1', `RS${DPI}`, 'W8', 'SRGB24', 'DM1', 'FN3', 'PQ4']
 
-function mediaColCollection(): IppAttribute {
+function mediaColCollection(widthHmm: number): IppAttribute {
 	return {
 		name: 'media-col-database',
 		values: [
@@ -75,7 +82,7 @@ function mediaColCollection(): IppAttribute {
 						{
 							tag: ValueTag.begCollection,
 							value: {
-								'x-dimension': [{ tag: ValueTag.integer, value: MEDIA_WIDTH_HMM }],
+								'x-dimension': [{ tag: ValueTag.integer, value: widthHmm }],
 								'y-dimension': [{ tag: ValueTag.integer, value: MEDIA_HEIGHT_HMM }],
 							},
 						},
@@ -93,6 +100,8 @@ function mediaColCollection(): IppAttribute {
 function buildPrinterAttributes(printerUri: string): IppGroup {
 	const cfg = getConfig()
 	const uuid = `urn:uuid:${cfg.printerUuid}`
+	const mediaWidthHmm = paperWidthHmm(cfg.paperWidthDots)
+	const mediaName = `om_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm`
 
 	const attributes: IppAttribute[] = [
 		attr.uri('printer-uri-supported', printerUri),
@@ -123,7 +132,7 @@ function buildPrinterAttributes(printerUri: string): IppGroup {
 		attr.naturalLanguage('natural-language-configured', 'en'),
 		attr.naturalLanguage('generated-natural-language-supported', 'en'),
 		attr.mime('document-format-default', 'image/urf'),
-		attr.mime('document-format-supported', ['image/urf', 'image/pwg-raster', 'application/octet-stream']),
+		attr.mime('document-format-supported', PDL_SUPPORTED),
 		attr.keyword('compression-supported', 'none'),
 		attr.keyword('pdl-override-supported', 'attempted'),
 		attr.int('queued-job-count', jobs.size),
@@ -141,11 +150,11 @@ function buildPrinterAttributes(printerUri: string): IppGroup {
 		attr.enum('finishings-default', 3),
 		attr.keyword('output-bin-supported', 'face-up'),
 		attr.keyword('output-bin-default', 'face-up'),
-		// Media (80 mm roll).
-		attr.keyword('media-supported', MEDIA_NAME),
-		attr.keyword('media-default', MEDIA_NAME),
-		attr.keyword('media-ready', MEDIA_NAME),
-		mediaColCollection(),
+		// Media (roll; width follows the configured paper size).
+		attr.keyword('media-supported', mediaName),
+		attr.keyword('media-default', mediaName),
+		attr.keyword('media-ready', mediaName),
+		mediaColCollection(mediaWidthHmm),
 		attr.keyword('media-source-supported', 'main'),
 		attr.keyword('media-type-supported', 'labels'),
 		attr.range('copies-supported', 1, 99),
@@ -214,17 +223,28 @@ async function processJob(job: Job): Promise<void> {
 	if (!cfg.printerIp) {
 		job.state = 8 // aborted
 		console.error('IPP job přijat, ale není nastavená IP termální tiskárny (printerIp).')
+		logJob({ source: 'ipp', printerIp: '', name: job.name, status: 'error', error: 'Není nastavená cílová tiskárna' })
 		return
 	}
 	try {
 		job.state = 5 // processing
-		const pages = decodeRaster(job.document)
-		await printRasterPages(cfg.printerIp, pages, 1)
+		// The OS sends either raster (PWG/URF) or PDF; sniff the magic bytes.
+		const isPdf = job.document.subarray(0, 5).toString('latin1') === '%PDF-'
+		const pages = isPdf ? await renderPdfToPages(job.document, cfg.paperWidthDots) : decodeRaster(job.document)
+		await printRasterPages(cfg.printerIp, pages, job.copies)
 		job.state = 9 // completed
-		console.log(`IPP job ${job.id}: vytištěno ${pages.length} stran na ${cfg.printerIp}`)
+		console.log(`IPP job ${job.id}: vytištěno ${pages.length} stran ×${job.copies} na ${cfg.printerIp}`)
+		logJob({ source: 'ipp', printerIp: cfg.printerIp, name: job.name, pages: pages.length, status: 'ok' })
 	} catch (err) {
 		job.state = 8 // aborted
 		console.error(`IPP job ${job.id} selhal:`, err)
+		logJob({
+			source: 'ipp',
+			printerIp: cfg.printerIp,
+			name: job.name,
+			status: 'error',
+			error: err instanceof Error ? err.message : 'Chyba tisku',
+		})
 	} finally {
 		job.document = Buffer.alloc(0) // free memory
 	}
@@ -266,6 +286,7 @@ export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<B
 				state: 5,
 				name: typeof nameVal?.value === 'string' ? nameVal.value : 'Print job',
 				createdAt: Date.now(),
+				copies: readCopies(req),
 				document: req.data,
 			}
 			jobs.set(job.id, job)
@@ -281,6 +302,7 @@ export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<B
 				state: 3, // pending, waiting for Send-Document
 				name: typeof nameVal?.value === 'string' ? nameVal.value : 'Print job',
 				createdAt: Date.now(),
+				copies: readCopies(req),
 				document: Buffer.alloc(0),
 			}
 			jobs.set(job.id, job)

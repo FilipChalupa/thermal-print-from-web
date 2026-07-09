@@ -1,18 +1,42 @@
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
+import { createConnection } from 'net'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { stream } from 'hono/streaming'
+import { stream, streamSSE } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { getConfig, setConfig } from './config.js'
-import { discoverPrinters, pickDefaultPrinter } from './discovery.js'
+import { getConfig, removePrinter, setConfig, upsertPrinter } from './config.js'
+import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
+import { getJobLog, logJob } from './jobs-log.js'
 import { startIppHttpServer } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import { printImage, printTestReceipt } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const publicDir = join(__dirname, '..', 'public')
+
+// Live runtime status for /health.
+const runtime = { ippPort: 0, ippRunning: false, mdnsAdvertising: false }
+
+/** Quick TCP reachability check of a thermal printer's raw-print port. */
+function isReachable(ip: string, timeoutMs = 800): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!ip) return resolve(false)
+    const socket = createConnection({ host: ip, port: 9100 })
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(ok)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+}
 
 const app = new Hono()
 
@@ -50,32 +74,53 @@ app.post('/print', async (c) => {
         const buffer = Buffer.from(await image.arrayBuffer())
         await printImage(ip, buffer, copies)
       } catch (err) {
-        await s.write(JSON.stringify({
-          type: 'error',
-          message: err instanceof Error ? err.message : 'Chyba při tisku',
-        }) + '\n')
+        const message = err instanceof Error ? err.message : 'Chyba při tisku'
+        logJob({ source: 'web', printerIp: ip, name: image.name, status: 'error', error: message })
+        await s.write(JSON.stringify({ type: 'error', message }) + '\n')
         return
       }
     }
 
+    logJob({ source: 'web', printerIp: ip, name: `${imageFiles.length}× obrázek`, pages: imageFiles.length, status: 'ok' })
     await s.write(JSON.stringify({ type: 'done' }) + '\n')
   })
 })
 
 // Configuration for the virtual (driverless) printer: the target thermal
 // printer IP and the advertised name. Used by IPP jobs, which carry no IP.
-app.get('/config', (c) => {
+function publicConfig() {
   const cfg = getConfig()
-  return c.json({ printerIp: cfg.printerIp, printerName: cfg.printerName })
-})
+  return { printerIp: cfg.printerIp, printerName: cfg.printerName, paperWidthDots: cfg.paperWidthDots }
+}
+
+app.get('/config', (c) => c.json(publicConfig()))
 
 app.post('/config', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const patch: { printerIp?: string; printerName?: string } = {}
+  const patch: { printerIp?: string; printerName?: string; paperWidthDots?: number } = {}
   if (typeof body.printerIp === 'string') patch.printerIp = body.printerIp.trim()
   if (typeof body.printerName === 'string' && body.printerName.trim()) patch.printerName = body.printerName.trim()
-  const cfg = setConfig(patch)
-  return c.json({ printerIp: cfg.printerIp, printerName: cfg.printerName })
+  if (body.paperWidthDots === 384 || body.paperWidthDots === 576) patch.paperWidthDots = body.paperWidthDots
+  setConfig(patch)
+  return c.json(publicConfig())
+})
+
+// Saved / renamed printers, kept across reloads.
+app.get('/printers', (c) => c.json({ printers: getConfig().printers }))
+
+app.put('/printers', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
+  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  if (!ip || !name) return c.json({ error: 'ip a name jsou povinné' }, 400)
+  return c.json({ printers: upsertPrinter(ip, name) })
+})
+
+app.delete('/printers', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
+  if (!ip) return c.json({ error: 'ip je povinná' }, 400)
+  return c.json({ printers: removePrinter(ip) })
 })
 
 // Auto-discovery of nearby thermal printers (mDNS + port-9100 sweep) to power
@@ -89,6 +134,41 @@ app.get('/discover', async (c) => {
   }
 })
 
+// Streaming discovery: emit each printer over SSE as soon as it is found, so the
+// UI fills in live (mDNS instantly, port scan trickles in) instead of blocking.
+app.get('/discover/stream', (c) =>
+  streamSSE(c, async (s) => {
+    const seen = new Set<string>()
+    try {
+      await discoverPrintersStream(async (printer) => {
+        // De-dupe by IP, but let a later mDNS hit upgrade a bare scan result.
+        const key = `${printer.ip}:${printer.source}`
+        if (seen.has(key)) return
+        seen.add(key)
+        await s.writeSSE({ event: 'printer', data: JSON.stringify(printer) })
+      })
+    } catch (err) {
+      console.error('Streaming discovery selhalo:', err)
+    }
+    await s.writeSSE({ event: 'done', data: '{}' })
+  }),
+)
+
+// Recent print jobs across all channels (IPP / web / test).
+app.get('/jobs', (c) => c.json({ jobs: getJobLog() }))
+
+// Liveness + capability status for healthchecks and debugging.
+app.get('/health', async (c) => {
+  const cfg = getConfig()
+  const printerReachable = await isReachable(cfg.printerIp)
+  return c.json({
+    ok: true,
+    ipp: { running: runtime.ippRunning, port: runtime.ippPort },
+    mdns: { advertising: runtime.mdnsAdvertising },
+    printer: { ip: cfg.printerIp, reachable: printerReachable },
+  })
+})
+
 // Print a text test receipt (name + IP) to a single printer.
 app.post('/print-test', async (c) => {
   const body = await c.req.json().catch(() => ({}))
@@ -97,9 +177,12 @@ app.post('/print-test', async (c) => {
   if (!ip) return c.json({ error: 'IP je povinná' }, 400)
   try {
     await printTestReceipt(ip, name, ip)
+    logJob({ source: 'test', printerIp: ip, name: `Test: ${name}`, status: 'ok' })
     return c.json({ ok: true })
   } catch (err) {
-    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
+    const error = err instanceof Error ? err.message : 'Chyba tisku'
+    logJob({ source: 'test', printerIp: ip, name: `Test: ${name}`, status: 'error', error })
+    return c.json({ ok: false, error }, 502)
   }
 })
 
@@ -174,6 +257,9 @@ export function startServer(
       try {
         const ipp = await startIppHttpServer({ port: options.ippPort ?? (Number(process.env.IPP_PORT) || 6310) })
         startMdns({ port: ipp.port })
+        runtime.ippPort = ipp.port
+        runtime.ippRunning = true
+        runtime.mdnsAdvertising = true
         resolve({ port: info.port, ippPort: ipp.port })
       } catch (err) {
         console.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
