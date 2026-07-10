@@ -10,9 +10,16 @@ Webová aplikace pro tisk obrázků na termální tiskárně Epson přes ESC/POS
 
 ## Funkce
 
-- Zadání IP adresy tiskárny
-- Nahrání obrázku s náhledem
-- Volitelný počet výtisků (výchozí 1), po každém výtisku automatický cut
+- **Web tisk obrázků** — nahrání/drag&drop/clipboard, náhled, rotace a řazení, počet výtisků, po každém automatický cut
+- **Síťová tiskárna bez ovladačů** (AirPrint / IPP Everywhere) — tisk z libovolné aplikace přes `Cmd/Ctrl+P` (viz níže)
+- **Auto-discovery** tiskáren v síti (mDNS + sken portu 9100) s našeptáváním a ověřením, že jde o ESC/POS tiskárnu
+- **Testovací lístek** na jednu nebo všechny nalezené tiskárny
+- **Šířka papíru** 80 mm (576 bodů) / 58 mm (384 bodů)
+- **Úpravy obrazu** — dithering (Floyd–Steinberg / Atkinson / Ordered / práh) + jas a kontrast
+- **Fronta tisku** — serializace na tiskárnu a opakování, když je krátce offline
+- **Stav tiskárny** — online / offline / došel papír / otevřené víko (přes ESC/POS `DLE EOT`), promítnuto i do IPP
+- **Historie úloh** s možností přetisku
+- **Více síťových tiskáren** — každá jako samostatná AirPrint fronta mířící na jinou fyzickou tiskárnu
 
 ## Síťová tiskárna bez ovladačů (AirPrint / IPP Everywhere)
 
@@ -24,12 +31,32 @@ Jak to funguje:
 - Implementuje **IPP** server (RFC 8011 + IPP Everywhere): `Get-Printer-Attributes`, `Validate-Job`, `Print-Job`, `Create-Job`/`Send-Document`, `Get-Jobs`, `Cancel-Job`.
 - OS pošle stránku jako **PWG Raster** (`image/pwg-raster`) nebo **Apple Raster / URF** (`image/urf`). Ta se dekóduje, přeškáluje na šířku tiskárny (576 dotů / 80 mm role, 203 dpi), Floyd–Steinberg dither a odešle jako ESC/POS na fyzickou tiskárnu.
 
-Cíl (IP fyzické termální tiskárny) se nastaví jednou ve webovém UI (pole *IP adresa tiskárny*) — uloží se do konfigurace serveru a použije se pro všechny síťové tisky. Pole IP navíc **automaticky napovídá** tiskárny nalezené v síti (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24); rozsah skenu lze přebít přes `THERMAL_DISCOVERY_HOSTS`. Konfigurace se ukládá do `~/.thermal-print-config.json` (lze změnit přes `THERMAL_CONFIG_PATH`).
+- OS pošle stránku i jako **PDF** (`application/pdf`) — vyrenderuje se přes MuPDF.
 
-Relevantní proměnné prostředí:
+### Hvězdička a výběr tiskárny
 
-- `IPP_PORT` — port IPP serveru (výchozí `6310`; do sítě se stejně ohlašuje přes mDNS, takže na konkrétní hodnotě nezáleží)
-- `PRINTER_IP`, `PRINTER_NAME` — výchozí cílová IP a jméno tiskárny v síti
+V síti se vždy ohlašuje jedna **hlavní** tiskárna (jméno z `PRINTER_NAME`, výchozí „Thermal Printer"). Ta posílá tisk na IP označenou ve webu **hvězdičkou** ★ — to je „cíl systémového tisku". Pole *IP adresa tiskárny* automaticky **napovídá** nalezené tiskárny (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24; rozsah lze přebít přes `THERMAL_DISCOVERY_HOSTS`) a první nalezenou zvolí automaticky.
+
+- **Hvězdička** = kam míří hlavní síťová (AirPrint) tiskárna.
+- **Tlačítko *Tisknout*** (ruční tisk obrázku z webu) míří na tiskárnu právě vybranou v selectu.
+- Sekce **Další síťové tiskárny** přidává samostatné AirPrint fronty — každá má vlastní pevnou IP a je na hvězdičce nezávislá.
+
+Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `THERMAL_CONFIG_PATH`).
+
+### Proměnné prostředí
+
+| Proměnná | Význam |
+| --- | --- |
+| `PORT` | Port webového UI / REST (výchozí `3000`) |
+| `IPP_PORT` | Port IPP serveru (výchozí `6310`; ohlašuje se přes mDNS, na hodnotě nezáleží) |
+| `PRINTER_IP`, `PRINTER_NAME` | Výchozí cílová IP a jméno hlavní tiskárny v síti |
+| `PAPER_WIDTH_DOTS` | Výchozí šířka tisku: `576` (80 mm) nebo `384` (58 mm) |
+| `THERMAL_CONFIG_PATH` | Cesta ke konfiguračnímu souboru |
+| `THERMAL_DISCOVERY_HOSTS` | Ruční seznam IP pro sken (místo autodetekce podsítě) |
+| `WEBHOOK_URL` | Když je nastaveno, při selhání tisku se sem POSTne upozornění |
+| `PRINT_QUEUE_MAX_WAIT_MS`, `PRINT_QUEUE_RETRY_GAP_MS` | Okno opakování fronty pro offline tiskárnu |
+
+Stav a diagnostika je na `GET /health` (běží IPP/mDNS, dostupnost a stav tiskárny, počty úloh, seznam ohlašovaných tiskáren).
 
 > Při prvním spuštění může Windows/macOS firewall vyžádat povolení příchozích spojení (IPP port + mDNS). IPP server naslouchá na `0.0.0.0`, samotné webové UI zůstává jen na loopbacku.
 
@@ -43,6 +70,14 @@ Relevantní proměnné prostředí:
 ```bash
 npm ci          # nainstaluje devDependencies (concurrently)
 npm run dev          # spustí backend (port 3000) + frontend (port 5173)
+```
+
+## Testy
+
+Backend má sadu testů (vitest) pokrývající IPP kodek, PWG/URF dekodér, PDF rendering, dithering, frontu tisku, přetisk, IPP atributy/stav a discovery:
+
+```bash
+npm test --prefix backend
 ```
 
 ## Desktopová aplikace (Electron)
@@ -96,7 +131,7 @@ VITE_BACKEND_URL=https://tvuj-backend.domena.cz
 
 Web (HTTP) funguje odkudkoli, ale **driverless tisk (AirPrint / IPP Everywhere) funguje jen z hostitele na stejné LAN** jako tiskárna a zařízení, ze kterých tiskneš — mDNS discovery jede přes UDP multicast, který neprojde přes internet ani mezi podsítěmi.
 
-Navíc je potřeba **host networking** — v běžné Docker bridge síti se multicast na LAN nedostane. Použij proto [docker-compose.yml](docker-compose.yml) jako **Docker Compose** resource v Coolify; má `network_mode: host` a perzistuje vybranou tiskárnu.
+Navíc je potřeba **host networking** — v běžné Docker bridge síti se multicast na LAN nedostane. Nasaď proto službu s `network_mode: host` (v Coolify přes **Docker Compose** resource, kde si nastavíš host síť; konfiguraci nezapomeň perzistovat volume na `THERMAL_CONFIG_PATH`, aby zůstala vybraná tiskárna a UUID i po redeployi).
 
 Na hostiteli povol na LAN příchozí provoz:
 

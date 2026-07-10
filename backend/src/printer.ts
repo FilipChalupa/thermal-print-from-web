@@ -6,7 +6,6 @@ import type { DitherAlgorithm } from './config.js'
 import type { RasterPage } from './ipp/pwg-raster.js'
 
 const DOTS_PER_LINE = 576
-export const PRINT_WIDTH_DOTS = DOTS_PER_LINE
 
 /** Configured print width in dots (576 = 80 mm, 384 = 58 mm), rounded to a byte. */
 function printWidthDots(): number {
@@ -256,8 +255,4 @@ export async function printImage(host: string, imageBuffer: Buffer, copies: numb
 
 export async function printRasterPages(host: string, pages: RasterPage[], copies: number): Promise<void> {
   await sendEscPos(host, await buildRasterPayload(pages, copies))
-}
-
-export async function printTestReceipt(host: string, name: string, ip: string): Promise<void> {
-  await sendEscPos(host, buildTestPayload(name, ip))
 }
