@@ -5,7 +5,7 @@ import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { getConfig, removePrinter, setConfig, upsertPrinter } from './config.js'
+import { DITHER_ALGORITHMS, getConfig, removePrinter, setConfig, upsertPrinter } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { getJobLog, logJob } from './jobs-log.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
@@ -71,17 +71,29 @@ app.post('/print', async (c) => {
 // printer IP and the advertised name. Used by IPP jobs, which carry no IP.
 function publicConfig() {
   const cfg = getConfig()
-  return { printerIp: cfg.printerIp, printerName: cfg.printerName, paperWidthDots: cfg.paperWidthDots }
+  return {
+    printerIp: cfg.printerIp,
+    printerName: cfg.printerName,
+    paperWidthDots: cfg.paperWidthDots,
+    ditherAlgorithm: cfg.ditherAlgorithm,
+    brightness: cfg.brightness,
+    contrast: cfg.contrast,
+  }
 }
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)))
 
 app.get('/config', (c) => c.json(publicConfig()))
 
 app.post('/config', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const patch: { printerIp?: string; printerName?: string; paperWidthDots?: number } = {}
+  const patch: Partial<ReturnType<typeof getConfig>> = {}
   if (typeof body.printerIp === 'string') patch.printerIp = body.printerIp.trim()
   if (typeof body.printerName === 'string' && body.printerName.trim()) patch.printerName = body.printerName.trim()
   if (body.paperWidthDots === 384 || body.paperWidthDots === 576) patch.paperWidthDots = body.paperWidthDots
+  if (DITHER_ALGORITHMS.includes(body.ditherAlgorithm)) patch.ditherAlgorithm = body.ditherAlgorithm
+  if (typeof body.brightness === 'number') patch.brightness = clamp(body.brightness, -100, 100)
+  if (typeof body.contrast === 'number') patch.contrast = clamp(body.contrast, -100, 100)
   setConfig(patch)
   if (patch.printerIp !== undefined) void refreshPrinterStatus() // re-check the new target
   return c.json(publicConfig())

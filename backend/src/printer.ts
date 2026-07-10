@@ -2,6 +2,7 @@ import { Canvas, Image, ImageData, loadImage } from 'skia-canvas'
 import iconv from 'iconv-lite'
 import * as net from 'net'
 import { getConfig } from './config.js'
+import type { DitherAlgorithm } from './config.js'
 import type { RasterPage } from './ipp/pwg-raster.js'
 
 const DOTS_PER_LINE = 576
@@ -13,36 +14,87 @@ function printWidthDots(): number {
   return Math.max(8, Math.round(dots / 8) * 8)
 }
 
-function dither(imageData: Uint8ClampedArray, width: number, height: number): Uint8Array {
+export interface HalftoneOptions {
+  algorithm: DitherAlgorithm
+  brightness: number // -100…100
+  contrast: number // -100…100
+}
+
+// Normalized 8×8 Bayer matrix for ordered dithering.
+const BAYER_8 = [
+  [0, 32, 8, 40, 2, 34, 10, 42],
+  [48, 16, 56, 24, 50, 18, 58, 26],
+  [12, 44, 4, 36, 14, 46, 6, 38],
+  [60, 28, 52, 20, 62, 30, 54, 22],
+  [3, 35, 11, 43, 1, 33, 9, 41],
+  [51, 19, 59, 27, 49, 17, 57, 25],
+  [15, 47, 7, 39, 13, 45, 5, 37],
+  [63, 31, 55, 23, 61, 29, 53, 21],
+]
+
+/**
+ * Convert RGBA image data to packed 1-bit (1 = black), applying brightness /
+ * contrast and the chosen halftoning algorithm.
+ */
+export function halftone(
+  imageData: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: HalftoneOptions,
+): Uint8Array {
   const pixels = new Float32Array(width * height)
 
-  // Convert to grayscale luminance
+  // Grayscale luminance with brightness / contrast pre-adjustment.
+  const bAdd = opts.brightness * 1.28
+  const c = Math.max(-255, Math.min(255, opts.contrast * 2.55))
+  const cf = (259 * (c + 255)) / (255 * (259 - c))
   for (let i = 0; i < width * height; i++) {
-    const r = imageData[i * 4]
-    const g = imageData[i * 4 + 1]
-    const b = imageData[i * 4 + 2]
-    pixels[i] = 0.299 * r + 0.587 * g + 0.114 * b
+    const lum = 0.299 * imageData[i * 4] + 0.587 * imageData[i * 4 + 1] + 0.114 * imageData[i * 4 + 2]
+    pixels[i] = Math.max(0, Math.min(255, cf * (lum + bAdd - 128) + 128))
   }
 
-  // Floyd-Steinberg dithering
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x
-      const old = pixels[idx]
-      const newVal = old < 128 ? 0 : 255
-      pixels[idx] = newVal
-      const err = old - newVal
-
-      if (x + 1 < width) pixels[idx + 1] += (err * 7) / 16
-      if (y + 1 < height) {
-        if (x - 1 >= 0) pixels[idx + width - 1] += (err * 3) / 16
-        pixels[idx + width] += (err * 5) / 16
-        if (x + 1 < width) pixels[idx + width + 1] += (err * 1) / 16
+  if (opts.algorithm === 'threshold' || opts.algorithm === 'ordered') {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x
+        const threshold = opts.algorithm === 'ordered' ? ((BAYER_8[y & 7][x & 7] + 0.5) / 64) * 255 : 128
+        pixels[idx] = pixels[idx] < threshold ? 0 : 255
+      }
+    }
+  } else {
+    // Error-diffusion (Floyd–Steinberg or Atkinson).
+    const atkinson = opts.algorithm === 'atkinson'
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x
+        const old = pixels[idx]
+        const newVal = old < 128 ? 0 : 255
+        pixels[idx] = newVal
+        const err = old - newVal
+        const add = (dx: number, dy: number, num: number, den: number) => {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || nx >= width || ny >= height) return
+          pixels[ny * width + nx] += (err * num) / den
+        }
+        if (atkinson) {
+          add(1, 0, 1, 8)
+          add(2, 0, 1, 8)
+          add(-1, 1, 1, 8)
+          add(0, 1, 1, 8)
+          add(1, 1, 1, 8)
+          add(0, 2, 1, 8)
+        } else {
+          add(1, 0, 7, 16)
+          add(-1, 1, 3, 16)
+          add(0, 1, 5, 16)
+          add(1, 1, 1, 16)
+        }
       }
     }
   }
 
-  // Convert to 1-bit per pixel packed bytes
+  // Pack to 1-bit per pixel (black = set bit).
   const bytesPerRow = Math.ceil(width / 8)
   const result = new Uint8Array(bytesPerRow * height)
   for (let y = 0; y < height; y++) {
@@ -71,7 +123,12 @@ function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: n
   ctx.drawImage(source, 0, 0, printWidth, printHeight)
   const imageData = ctx.getImageData(0, 0, printWidth, printHeight)
 
-  const bits = dither(imageData.data as Uint8ClampedArray, printWidth, printHeight)
+  const cfg = getConfig()
+  const bits = halftone(imageData.data as Uint8ClampedArray, printWidth, printHeight, {
+    algorithm: cfg.ditherAlgorithm,
+    brightness: cfg.brightness,
+    contrast: cfg.contrast,
+  })
   const bytesPerRow = Math.ceil(printWidth / 8)
   const chunkHeight = 1024
 

@@ -347,6 +347,44 @@ label {
   color: var(--text-h);
 }
 
+.adjust {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 12px;
+}
+
+.adjust > summary {
+  cursor: pointer;
+  padding: 10px 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.adjust > label {
+  margin-bottom: 12px;
+}
+
+.adjust .slider {
+  gap: 4px;
+}
+
+.adjust .slider span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.adjust .slider em {
+  font-style: normal;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.adjust input[type='range'] {
+  width: 100%;
+  accent-color: #0070f3;
+}
+
 .jobs {
   margin-top: 28px;
   text-align: left;

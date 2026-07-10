@@ -24,7 +24,16 @@ export interface Config {
 	paperWidthDots: number
 	/** User-saved / renamed printers, kept across reloads even if not rediscovered. */
 	printers: SavedPrinter[]
+	/** Halftoning algorithm applied when converting images to 1-bit. */
+	ditherAlgorithm: DitherAlgorithm
+	/** Brightness adjustment, -100…100 (applied before dithering). */
+	brightness: number
+	/** Contrast adjustment, -100…100 (applied before dithering). */
+	contrast: number
 }
+
+export type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
+export const DITHER_ALGORITHMS: DitherAlgorithm[] = ['floyd', 'atkinson', 'ordered', 'threshold']
 
 /** Physical paper width (hundredths of mm) advertised over IPP, per print width. */
 export function paperWidthHmm(dots: number): number {
@@ -39,6 +48,9 @@ const defaults: Config = {
 	printerUuid: '',
 	paperWidthDots: Number(process.env.PAPER_WIDTH_DOTS) || 576,
 	printers: [],
+	ditherAlgorithm: 'floyd',
+	brightness: 0,
+	contrast: 0,
 }
 
 let cache: Config | null = null

@@ -26,6 +26,15 @@ interface PrintProgress {
   name: string
 }
 
+type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
+
+const DITHER_LABELS: Record<DitherAlgorithm, string> = {
+  floyd: 'Floyd–Steinberg',
+  atkinson: 'Atkinson',
+  ordered: 'Ordered (rastr)',
+  threshold: 'Práh (bez ditheru)',
+}
+
 interface SavedPrinter {
   ip: string
   name: string
@@ -69,6 +78,9 @@ export default function App() {
   const [discovering, setDiscovering] = useState(false)
   const [saved, setSaved] = useState<SavedPrinter[]>([])
   const [paperWidthDots, setPaperWidthDots] = useState(576)
+  const [ditherAlgorithm, setDitherAlgorithm] = useState<DitherAlgorithm>('floyd')
+  const [brightness, setBrightness] = useState(0)
+  const [contrast, setContrast] = useState(0)
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
   // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
   const [starredIp, setStarredIp] = useState('')
@@ -116,6 +128,9 @@ export default function App() {
       .then((cfg) => {
         if (!cfg) return
         if (cfg.paperWidthDots) setPaperWidthDots(cfg.paperWidthDots)
+        if (cfg.ditherAlgorithm) setDitherAlgorithm(cfg.ditherAlgorithm)
+        if (typeof cfg.brightness === 'number') setBrightness(cfg.brightness)
+        if (typeof cfg.contrast === 'number') setContrast(cfg.contrast)
         if (cfg.printerIp) {
           setStarredIp(cfg.printerIp)
           if (!ip) setIp(cfg.printerIp)
@@ -219,6 +234,19 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paperWidthDots: dots }),
     }).catch(() => {})
+  }
+
+  // Persist image/dither settings, debounced so sliders don't spam the backend.
+  const settingsTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  function postSettings(patch: Record<string, unknown>) {
+    clearTimeout(settingsTimer.current)
+    settingsTimer.current = setTimeout(() => {
+      fetch(`${BACKEND_URL}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }).catch(() => {})
+    }, 300)
   }
 
   // Merge saved + live-discovered + the current/starred IP into one list.
@@ -493,6 +521,59 @@ export default function App() {
               <option value={384}>58 mm (384 bodů)</option>
             </select>
           </label>
+
+          <details className="adjust">
+            <summary>Úpravy obrazu</summary>
+            <label className="paper-size">
+              Dithering
+              <select
+                value={ditherAlgorithm}
+                onChange={(e) => {
+                  const v = e.target.value as DitherAlgorithm
+                  setDitherAlgorithm(v)
+                  postSettings({ ditherAlgorithm: v })
+                }}
+              >
+                {(Object.keys(DITHER_LABELS) as DitherAlgorithm[]).map((a) => (
+                  <option key={a} value={a}>
+                    {DITHER_LABELS[a]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="slider">
+              <span>
+                Jas <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={brightness}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setBrightness(v)
+                  postSettings({ brightness: v })
+                }}
+              />
+            </label>
+            <label className="slider">
+              <span>
+                Kontrast <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={contrast}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  setContrast(v)
+                  postSettings({ contrast: v })
+                }}
+              />
+            </label>
+          </details>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
             <input
