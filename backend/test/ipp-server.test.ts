@@ -28,7 +28,8 @@ function opGroup() {
 }
 
 async function request(msg: IppMessage): Promise<IppMessage> {
-	return decode(await server.handleIppRequest(encode(msg), { printerUri: 'ipp://x/ipp/print' }))
+	const printer = config.resolveAdvertisedPrinter('/ipp/print')
+	return decode(await server.handleIppRequest(encode(msg), { printerUri: 'ipp://x/ipp/print', printer }))
 }
 
 function tinyPwg(w = 80, h = 40): Buffer {

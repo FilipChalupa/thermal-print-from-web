@@ -41,4 +41,22 @@ describe('config', () => {
 		expect(cfg.getConfig().paperWidthDots).toBe(384)
 		expect(cfg.getConfig().brightness).toBe(20)
 	})
+
+	it('advertises the primary printer plus virtual ones on distinct paths', () => {
+		cfg.setConfig({ printerName: 'Primary', printerIp: '10.0.0.1' })
+		const extras = cfg.addVirtualPrinter('Bar', '10.0.0.2')
+		const id = extras[0].id
+
+		const advertised = cfg.getAdvertisedPrinters()
+		expect(advertised[0]).toMatchObject({ name: 'Primary', targetIp: '10.0.0.1', resourcePath: 'ipp/print', primary: true })
+		expect(advertised[1]).toMatchObject({ name: 'Bar', targetIp: '10.0.0.2', resourcePath: `ipp/print/${id}`, primary: false })
+
+		// Each advertised printer resolves back from its request path.
+		expect(cfg.resolveAdvertisedPrinter(`/ipp/print/${id}`).targetIp).toBe('10.0.0.2')
+		expect(cfg.resolveAdvertisedPrinter('/ipp/print').primary).toBe(true)
+		expect(cfg.resolveAdvertisedPrinter('/unknown').primary).toBe(true) // falls back to primary
+
+		cfg.removeVirtualPrinter(id)
+		expect(cfg.getAdvertisedPrinters()).toHaveLength(1)
+	})
 })
