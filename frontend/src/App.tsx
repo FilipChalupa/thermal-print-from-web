@@ -40,10 +40,32 @@ interface SavedPrinter {
   name: string
 }
 
+interface VirtualPrinter {
+  id: string
+  name: string
+  targetIp: string
+}
+
+interface TargetStatus {
+  reachable: boolean
+  online: boolean
+  paperOut: boolean
+  coverOpen: boolean
+}
+
+function targetBadge(t: TargetStatus | null): { cls: 'online' | 'offline'; label: string } | null {
+  if (!t) return null
+  if (!t.reachable) return { cls: 'offline', label: 'offline' }
+  if (t.paperOut) return { cls: 'offline', label: 'došel papír' }
+  if (t.coverOpen) return { cls: 'offline', label: 'otevřené víko' }
+  if (!t.online) return { cls: 'offline', label: 'není připraveno' }
+  return { cls: 'online', label: 'online' }
+}
+
 interface JobLogEntry {
   id: number
   at: number
-  source: 'ipp' | 'web' | 'test'
+  source: 'ipp' | 'web' | 'test' | 'reprint'
   printerIp: string
   name: string
   pages?: number
@@ -86,8 +108,9 @@ export default function App() {
   const [starredIp, setStarredIp] = useState('')
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
-  // Live reachability of the system-print target (from /health).
-  const [targetReachable, setTargetReachable] = useState<boolean | null>(null)
+  // Live status of the system-print target (from /health).
+  const [target, setTarget] = useState<TargetStatus | null>(null)
+  const [virtualPrinters, setVirtualPrinters] = useState<VirtualPrinter[]>([])
 
   // Feed print activity into the shared top-edge loading indicator.
   useMirrorLoading(status === 'loading' || testing)
@@ -110,7 +133,14 @@ export default function App() {
   function refreshHealth() {
     fetch(`${BACKEND_URL}/health`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((h) => setTargetReachable(h?.printer?.ip ? Boolean(h.printer.reachable) : null))
+      .then((h) => {
+        const p = h?.printer
+        setTarget(
+          p?.ip
+            ? { reachable: Boolean(p.reachable), online: Boolean(p.online), paperOut: Boolean(p.paperOut), coverOpen: Boolean(p.coverOpen) }
+            : null,
+        )
+      })
       .catch(() => {})
   }
   // Poll the target printer's online/offline status.
@@ -141,6 +171,7 @@ export default function App() {
       .then((r) => (r.ok ? r.json() : { printers: [] }))
       .then((d) => setSaved(Array.isArray(d.printers) ? d.printers : []))
       .catch(() => {})
+    loadVirtualPrinters()
     refreshJobs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -152,13 +183,44 @@ export default function App() {
     if (!value) return
     setStarredIp(value)
     setIp(value)
-    setTargetReachable(null)
+    setTarget(null)
     fetch(`${BACKEND_URL}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ printerIp: value }),
     })
       .then(() => setTimeout(refreshHealth, 1200)) // let the backend re-probe the new target
+      .catch(() => {})
+  }
+
+  // Reprint a previous job from the server-retained payload.
+  function reprintJob(id: number) {
+    fetch(`${BACKEND_URL}/jobs/${id}/reprint`, { method: 'POST' })
+      .then(() => setTimeout(refreshJobs, 300))
+      .catch(() => {})
+  }
+
+  // Extra driverless queues (each mapped to another physical printer).
+  function loadVirtualPrinters() {
+    fetch(`${BACKEND_URL}/virtual-printers`)
+      .then((r) => (r.ok ? r.json() : { virtualPrinters: [] }))
+      .then((d) => setVirtualPrinters(Array.isArray(d.virtualPrinters) ? d.virtualPrinters : []))
+      .catch(() => {})
+  }
+  function addVirtualPrinter(name: string, targetIp: string) {
+    fetch(`${BACKEND_URL}/virtual-printers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, targetIp }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.virtualPrinters && setVirtualPrinters(d.virtualPrinters))
+      .catch(() => {})
+  }
+  function removeVirtualPrinter(id: string) {
+    fetch(`${BACKEND_URL}/virtual-printers/${id}`, { method: 'DELETE' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.virtualPrinters && setVirtualPrinters(d.virtualPrinters))
       .catch(() => {})
   }
 
@@ -501,11 +563,10 @@ export default function App() {
               {starredIp ? (
                 <>
                   Systémový tisk (Cmd/Ctrl+P) míří na <strong>★ {starredLabel}</strong>
-                  {targetReachable !== null && (
-                    <span className={`reach-badge ${targetReachable ? 'online' : 'offline'}`}>
-                      {targetReachable ? 'online' : 'offline'}
-                    </span>
-                  )}
+                  {(() => {
+                    const badge = targetBadge(target)
+                    return badge ? <span className={`reach-badge ${badge.cls}`}>{badge.label}</span> : null
+                  })()}
                 </>
               ) : (
                 <>Označ tiskárnu hvězdičkou — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
@@ -677,18 +738,92 @@ export default function App() {
                     </span>
                   </span>
                   <span className="job-time">{formatTime(j.at)}</span>
+                  {j.status === 'ok' && (
+                    <button
+                      type="button"
+                      className="job-reprint"
+                      onClick={() => reprintJob(j.id)}
+                      title="Vytisknout znovu"
+                      aria-label="Vytisknout znovu"
+                    >
+                      ↻
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           </section>
         )}
+
+        <VirtualPrinters printers={virtualPrinters} onAdd={addVirtualPrinter} onRemove={removeVirtualPrinter} />
       </main>
     </>
   )
 }
 
 function jobSourceLabel(source: JobLogEntry['source']): string {
-  return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : 'Test'
+  return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : source === 'reprint' ? 'Přetisk' : 'Test'
+}
+
+const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/
+
+function VirtualPrinters({
+  printers,
+  onAdd,
+  onRemove,
+}: {
+  printers: VirtualPrinter[]
+  onAdd: (name: string, targetIp: string) => void
+  onRemove: (id: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [targetIp, setTargetIp] = useState('')
+  const canAdd = name.trim().length > 0 && IPV4_RE.test(targetIp.trim())
+
+  return (
+    <details className="vprinters">
+      <summary>Další síťové tiskárny {printers.length > 0 ? `(${printers.length})` : ''}</summary>
+      <p className="vprinters-hint">
+        Každá se v síti objeví jako samostatná systémová tiskárna mířící na zadanou IP. (Nová se ohlásí do sítě do pár sekund.)
+      </p>
+      {printers.length > 0 && (
+        <ul className="vprinters-list">
+          {printers.map((p) => (
+            <li key={p.id}>
+              <span className="vprinters-main">
+                <span className="vprinters-name">{p.name}</span>
+                <span className="vprinters-ip">{p.targetIp}</span>
+              </span>
+              <button type="button" className="ps-icon-btn ps-remove" onClick={() => onRemove(p.id)} title="Odebrat" aria-label={`Odebrat ${p.name}`}>
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="vprinters-add">
+        <input type="text" placeholder="Název (např. Kuchyně)" value={name} onChange={(e) => setName(e.target.value)} />
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="IP, např. 192.168.1.50"
+          value={targetIp}
+          onChange={(e) => setTargetIp(e.target.value)}
+        />
+        <button
+          type="button"
+          disabled={!canAdd}
+          onClick={() => {
+            onAdd(name.trim(), targetIp.trim())
+            setName('')
+            setTargetIp('')
+          }}
+        >
+          Přidat
+        </button>
+      </div>
+    </details>
+  )
 }
 
 function formatTime(at: number): string {
