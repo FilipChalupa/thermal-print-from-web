@@ -36,6 +36,25 @@ label {
   font-weight: 600;
 }
 
+.reach-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.reach-badge.online {
+  color: #1a7f37;
+  background: rgba(46, 160, 67, 0.15);
+}
+
+.reach-badge.offline {
+  color: #c00;
+  background: rgba(204, 0, 0, 0.12);
+}
+
 .test-msg {
   font-size: 0.8rem;
   color: #0070f3;

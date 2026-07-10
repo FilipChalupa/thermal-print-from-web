@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
-import { createConnection } from 'net'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
@@ -9,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'url'
 import { getConfig, removePrinter, setConfig, upsertPrinter } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { getJobLog, logJob } from './jobs-log.js'
+import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import { printImage, printTestReceipt } from './printer.js'
@@ -18,25 +18,6 @@ const publicDir = join(__dirname, '..', 'public')
 
 // Live runtime status for /health.
 const runtime = { ippPort: 0, ippRunning: false, mdnsAdvertising: false }
-
-/** Quick TCP reachability check of a thermal printer's raw-print port. */
-function isReachable(ip: string, timeoutMs = 800): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!ip) return resolve(false)
-    const socket = createConnection({ host: ip, port: 9100 })
-    let settled = false
-    const finish = (ok: boolean) => {
-      if (settled) return
-      settled = true
-      socket.destroy()
-      resolve(ok)
-    }
-    socket.setTimeout(timeoutMs)
-    socket.once('connect', () => finish(true))
-    socket.once('timeout', () => finish(false))
-    socket.once('error', () => finish(false))
-  })
-}
 
 const app = new Hono()
 
@@ -102,6 +83,7 @@ app.post('/config', async (c) => {
   if (typeof body.printerName === 'string' && body.printerName.trim()) patch.printerName = body.printerName.trim()
   if (body.paperWidthDots === 384 || body.paperWidthDots === 576) patch.paperWidthDots = body.paperWidthDots
   setConfig(patch)
+  if (patch.printerIp !== undefined) void refreshPrinterStatus() // re-check the new target
   return c.json(publicConfig())
 })
 
@@ -159,13 +141,16 @@ app.get('/jobs', (c) => c.json({ jobs: getJobLog() }))
 
 // Liveness + capability status for healthchecks and debugging.
 app.get('/health', async (c) => {
-  const cfg = getConfig()
-  const printerReachable = await isReachable(cfg.printerIp)
+  const st = getPrinterStatus()
+  // Re-probe on demand when the cached value is missing or stale, so the UI badge
+  // reacts within a poll rather than waiting for the background monitor.
+  const fresh = st.reachable !== null && Date.now() - st.lastCheck < 5000
+  const reachable = fresh ? st.reachable : await refreshPrinterStatus()
   return c.json({
     ok: true,
     ipp: { running: runtime.ippRunning, port: runtime.ippPort },
     mdns: { advertising: runtime.mdnsAdvertising },
-    printer: { ip: cfg.printerIp, reachable: printerReachable },
+    printer: { ip: st.ip, reachable },
   })
 })
 
@@ -246,6 +231,8 @@ export function startServer(
 
       // Warm discovery + auto-select a target in the background (non-blocking).
       void autoConfigurePrinter()
+      // Keep the target printer's online/offline status fresh for IPP + /health.
+      startPrinterMonitor()
 
       if (!enableIpp) {
         resolve({ port: info.port })

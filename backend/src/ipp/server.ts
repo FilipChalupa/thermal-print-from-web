@@ -6,6 +6,7 @@
  */
 import { getConfig, paperWidthHmm } from '../config.js'
 import { logJob } from '../jobs-log.js'
+import { getPrinterStatus } from '../printer-status.js'
 import { printRasterPages } from '../printer.js'
 import { attr, decode, encode, findAttr, GroupTag, ValueTag } from './encoding.js'
 import type { IppAttribute, IppGroup, IppMessage } from './encoding.js'
@@ -101,6 +102,12 @@ function buildPrinterAttributes(printerUri: string): IppGroup {
 	const cfg = getConfig()
 	const uuid = `urn:uuid:${cfg.printerUuid}`
 	const mediaWidthHmm = paperWidthHmm(cfg.paperWidthDots)
+
+	// Reflect whether the downstream thermal printer is reachable, so the OS shows
+	// the queue as idle vs. stopped/offline. `null` (not yet probed) is optimistic.
+	const online = getPrinterStatus().reachable !== false
+	const printerState = online ? 3 : 5 // idle vs. stopped
+	const stateReasons = online ? 'none' : cfg.printerIp ? 'connecting-to-device' : 'other'
 	const mediaName = `om_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm`
 
 	const attributes: IppAttribute[] = [
@@ -112,8 +119,8 @@ function buildPrinterAttributes(printerUri: string): IppGroup {
 		attr.text('printer-make-and-model', 'Thermal Printer (ESC/POS bridge)'),
 		attr.text('printer-location', ''),
 		attr.uri('printer-uuid', uuid),
-		attr.enum('printer-state', 3), // idle
-		attr.keyword('printer-state-reasons', 'none'),
+		attr.enum('printer-state', printerState),
+		attr.keyword('printer-state-reasons', stateReasons),
 		attr.bool('printer-is-accepting-jobs', true),
 		attr.keyword('ipp-versions-supported', ['1.1', '2.0']),
 		attr.keyword('ipp-features-supported', ['ipp-everywhere']),

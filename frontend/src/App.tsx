@@ -74,6 +74,8 @@ export default function App() {
   const [starredIp, setStarredIp] = useState('')
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
+  // Live reachability of the system-print target (from /health).
+  const [targetReachable, setTargetReachable] = useState<boolean | null>(null)
 
   // Feed print activity into the shared top-edge loading indicator.
   useMirrorLoading(status === 'loading' || testing)
@@ -92,6 +94,20 @@ export default function App() {
       .then((d) => setJobs(Array.isArray(d.jobs) ? d.jobs : []))
       .catch(() => {})
   }
+
+  function refreshHealth() {
+    fetch(`${BACKEND_URL}/health`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((h) => setTargetReachable(h?.printer?.ip ? Boolean(h.printer.reachable) : null))
+      .catch(() => {})
+  }
+  // Poll the target printer's online/offline status.
+  useEffect(() => {
+    refreshHealth()
+    const id = setInterval(refreshHealth, 15000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Load config (starred printer, paper size), saved printers and recent jobs.
   useEffect(() => {
@@ -121,11 +137,14 @@ export default function App() {
     if (!value) return
     setStarredIp(value)
     setIp(value)
+    setTargetReachable(null)
     fetch(`${BACKEND_URL}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ printerIp: value }),
-    }).catch(() => {})
+    })
+      .then(() => setTimeout(refreshHealth, 1200)) // let the backend re-probe the new target
+      .catch(() => {})
   }
 
   // Live discovery over SSE: printers appear as they are found (mDNS instantly,
@@ -454,6 +473,11 @@ export default function App() {
               {starredIp ? (
                 <>
                   Systémový tisk (Cmd/Ctrl+P) míří na <strong>★ {starredLabel}</strong>
+                  {targetReachable !== null && (
+                    <span className={`reach-badge ${targetReachable ? 'online' : 'offline'}`}>
+                      {targetReachable ? 'online' : 'offline'}
+                    </span>
+                  )}
                 </>
               ) : (
                 <>Označ tiskárnu hvězdičkou — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
