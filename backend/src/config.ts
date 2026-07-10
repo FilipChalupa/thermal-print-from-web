@@ -13,6 +13,23 @@ export interface SavedPrinter {
 	name: string
 }
 
+/** An additional driverless queue mapped to another physical printer. */
+export interface VirtualPrinter {
+	id: string
+	name: string
+	targetIp: string
+	uuid: string
+}
+
+/** A printer advertised over mDNS + IPP (the primary one plus any extras). */
+export interface AdvertisedPrinter {
+	name: string
+	uuid: string
+	targetIp: string
+	resourcePath: string
+	primary: boolean
+}
+
 export interface Config {
 	/** IP of the physical ESC/POS thermal printer to forward jobs to. */
 	printerIp: string
@@ -30,6 +47,8 @@ export interface Config {
 	brightness: number
 	/** Contrast adjustment, -100…100 (applied before dithering). */
 	contrast: number
+	/** Additional driverless queues, each mapped to another physical printer. */
+	virtualPrinters: VirtualPrinter[]
 }
 
 export type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
@@ -51,6 +70,7 @@ const defaults: Config = {
 	ditherAlgorithm: 'floyd',
 	brightness: 0,
 	contrast: 0,
+	virtualPrinters: [],
 }
 
 let cache: Config | null = null
@@ -90,4 +110,45 @@ export function upsertPrinter(ip: string, name: string): SavedPrinter[] {
 
 export function removePrinter(ip: string): SavedPrinter[] {
 	return setConfig({ printers: getConfig().printers.filter((p) => p.ip !== ip) }).printers
+}
+
+/** All printers to advertise: the primary (from the top-level fields) plus extras. */
+export function getAdvertisedPrinters(): AdvertisedPrinter[] {
+	const cfg = getConfig()
+	const primary: AdvertisedPrinter = {
+		name: cfg.printerName,
+		uuid: cfg.printerUuid,
+		targetIp: cfg.printerIp,
+		resourcePath: 'ipp/print',
+		primary: true,
+	}
+	const extras = cfg.virtualPrinters.map((p) => ({
+		name: p.name,
+		uuid: p.uuid,
+		targetIp: p.targetIp,
+		resourcePath: `ipp/print/${p.id}`,
+		primary: false,
+	}))
+	return [primary, ...extras]
+}
+
+/** Resolve an advertised printer from an IPP request path (falls back to primary). */
+export function resolveAdvertisedPrinter(path: string): AdvertisedPrinter {
+	const rp = path.replace(/^\/+/, '')
+	const all = getAdvertisedPrinters()
+	return all.find((p) => p.resourcePath === rp) ?? all[0]
+}
+
+export function addVirtualPrinter(name: string, targetIp: string): VirtualPrinter[] {
+	const printer: VirtualPrinter = { id: randomUUID().slice(0, 8), name, targetIp, uuid: randomUUID() }
+	return setConfig({ virtualPrinters: [...getConfig().virtualPrinters, printer] }).virtualPrinters
+}
+
+export function updateVirtualPrinter(id: string, patch: Partial<Pick<VirtualPrinter, 'name' | 'targetIp'>>): VirtualPrinter[] {
+	const virtualPrinters = getConfig().virtualPrinters.map((p) => (p.id === id ? { ...p, ...patch } : p))
+	return setConfig({ virtualPrinters }).virtualPrinters
+}
+
+export function removeVirtualPrinter(id: string): VirtualPrinter[] {
+	return setConfig({ virtualPrinters: getConfig().virtualPrinters.filter((p) => p.id !== id) }).virtualPrinters
 }

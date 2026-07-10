@@ -161,12 +161,17 @@ function rasterPageToEscPos(page: RasterPage): Buffer[] {
   return drawableToEscPos(canvas, page.width, page.height)
 }
 
-function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> {
+export const PRINTER_PORT = 9100
+const INIT = Buffer.from([0x1b, 0x40]) // Initialize printer
+const CENTER_ALIGN = Buffer.from([0x1b, 0x61, 1]) // Center alignment
+const FEED = Buffer.from([0x1b, 0x64, 6]) // Feed 6 lines before cut
+const CUT = Buffer.from([0x1b, 0x69]) // Full cut
+
+/** Open a raw-print connection and write a fully-assembled ESC/POS payload. */
+export function sendEscPos(host: string, payload: Buffer): Promise<void> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host, port }, () => {
-      for (const chunk of data) {
-        socket.write(chunk)
-      }
+    const socket = net.createConnection({ host, port: PRINTER_PORT }, () => {
+      socket.write(payload)
       setTimeout(() => {
         socket.end()
         resolve()
@@ -180,43 +185,42 @@ function socketWrite(host: string, port: number, data: Buffer[]): Promise<void> 
   })
 }
 
-const PRINTER_PORT = 9100
-const INIT = Buffer.from([0x1b, 0x40]) // Initialize printer
-const CENTER_ALIGN = Buffer.from([0x1b, 0x61, 1]) // Center alignment
-const FEED = Buffer.from([0x1b, 0x64, 6]) // Feed 6 lines before cut
-const CUT = Buffer.from([0x1b, 0x69]) // Full cut
-
-/** Wrap already-rendered ESC/POS raster chunks with init/cut and send `copies` times. */
-async function sendCopies(host: string, chunks: Buffer[], copies: number): Promise<void> {
-  const payload: Buffer[] = [INIT, CENTER_ALIGN]
-  for (let i = 0; i < copies; i++) {
-    payload.push(...chunks, FEED, CUT)
-  }
-  await socketWrite(host, PRINTER_PORT, payload)
+/** Wrap already-rendered ESC/POS raster chunks with init/cut, `copies` times. */
+function assembleCopies(chunks: Buffer[], copies: number): Buffer {
+  const parts: Buffer[] = [INIT, CENTER_ALIGN]
+  for (let i = 0; i < copies; i++) parts.push(...chunks, FEED, CUT)
+  return Buffer.concat(parts)
 }
 
-export async function printImage(host: string, imageBuffer: Buffer, copies: number): Promise<void> {
-  await sendCopies(host, await imageToEscPos(imageBuffer), copies)
+/** Build the ESC/POS payload for one image (assembled, ready to send). */
+export async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<Buffer> {
+  return assembleCopies(await imageToEscPos(imageBuffer), copies)
 }
 
-/**
- * Print decoded raster pages (from a driverless IPP job). All pages are rendered
- * back-to-back and the whole document is cut once per copy.
- */
-export async function printRasterPages(host: string, pages: RasterPage[], copies: number): Promise<void> {
+/** Build a payload from several images back-to-back (each cut), shared init. */
+export async function buildImagesPayload(imageBuffers: Buffer[], copies: number): Promise<Buffer> {
   const chunks: Buffer[] = []
-  for (const page of pages) {
-    chunks.push(...rasterPageToEscPos(page))
-  }
-  await sendCopies(host, chunks, copies)
+  for (const buf of imageBuffers) chunks.push(...(await imageToEscPos(buf)), FEED, CUT)
+  // Re-use assembleCopies for the shared INIT/CENTER, but the per-image feed/cut
+  // are already included, so pass the chunks as a single "copy" and repeat that.
+  const parts: Buffer[] = [INIT, CENTER_ALIGN]
+  for (let i = 0; i < copies; i++) parts.push(...chunks)
+  return Buffer.concat(parts)
+}
+
+/** Build the ESC/POS payload for decoded raster pages (from an IPP job). */
+export async function buildRasterPayload(pages: RasterPage[], copies: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for (const page of pages) chunks.push(...rasterPageToEscPos(page))
+  return assembleCopies(chunks, copies)
 }
 
 /**
- * Print a small text test receipt (printer name + IP + timestamp) so the user can
+ * Build a small text test receipt (printer name + IP + timestamp) so the user can
  * confirm a discovered device is really the intended thermal printer. Text is
  * encoded as CP852 for Czech characters.
  */
-export async function printTestReceipt(host: string, name: string, ip: string): Promise<void> {
+export function buildTestPayload(name: string, ip: string, at = new Date()): Buffer {
   const cp852 = (s: string) => iconv.encode(s, 'CP852')
   const DOUBLE = Buffer.from([0x1b, 0x21, 0x30]) // ESC ! — double width + height
   const NORMAL = Buffer.from([0x1b, 0x21, 0x00])
@@ -224,7 +228,7 @@ export async function printTestReceipt(host: string, name: string, ip: string): 
   const BOLD_OFF = Buffer.from([0x1b, 0x45, 0])
   const NL = Buffer.from([0x0a])
 
-  const payload: Buffer[] = [
+  return Buffer.concat([
     INIT,
     CENTER_ALIGN,
     DOUBLE,
@@ -238,10 +242,22 @@ export async function printTestReceipt(host: string, name: string, ip: string): 
     NL,
     cp852(ip),
     NL,
-    cp852(new Date().toLocaleString('cs-CZ')),
+    cp852(at.toLocaleString('cs-CZ')),
     NL,
     FEED,
     CUT,
-  ]
-  await socketWrite(host, PRINTER_PORT, payload)
+  ])
+}
+
+// Convenience wrappers (build + send). Used by tests and simple call sites.
+export async function printImage(host: string, imageBuffer: Buffer, copies: number): Promise<void> {
+  await sendEscPos(host, await buildImagePayload(imageBuffer, copies))
+}
+
+export async function printRasterPages(host: string, pages: RasterPage[], copies: number): Promise<void> {
+  await sendEscPos(host, await buildRasterPayload(pages, copies))
+}
+
+export async function printTestReceipt(host: string, name: string, ip: string): Promise<void> {
+  await sendEscPos(host, buildTestPayload(name, ip))
 }

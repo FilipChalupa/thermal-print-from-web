@@ -5,6 +5,7 @@
  */
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
 import type { AddressInfo } from 'net'
+import { resolveAdvertisedPrinter } from '../config.js'
 import { handleIppRequest } from './server.js'
 
 export interface IppHttpHandle {
@@ -31,8 +32,10 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
 	try {
 		const body = await readBody(req)
 		const host = req.headers.host ?? 'localhost'
-		const printerUri = `ipp://${host}${req.url || '/ipp/print'}`
-		const responseBuffer = await handleIppRequest(body, { printerUri })
+		const path = req.url || '/ipp/print'
+		const printer = resolveAdvertisedPrinter(path)
+		const printerUri = `ipp://${host}/${printer.resourcePath}`
+		const responseBuffer = await handleIppRequest(body, { printerUri, printer })
 		res.writeHead(200, { 'Content-Type': 'application/ipp' })
 		res.end(responseBuffer)
 	} catch (err) {

@@ -5,9 +5,11 @@
  * the physical thermal printer as ESC/POS.
  */
 import { getConfig, paperWidthHmm } from '../config.js'
+import type { AdvertisedPrinter } from '../config.js'
 import { logJob } from '../jobs-log.js'
+import { enqueuePrint } from '../print-queue.js'
 import { getPrinterStatus } from '../printer-status.js'
-import { printRasterPages } from '../printer.js'
+import { buildRasterPayload } from '../printer.js'
 import { attr, decode, encode, findAttr, GroupTag, ValueTag } from './encoding.js'
 import type { IppAttribute, IppGroup, IppMessage } from './encoding.js'
 import { renderPdfToPages } from './pdf.js'
@@ -50,6 +52,7 @@ interface Job {
 	name: string
 	createdAt: number
 	copies: number
+	target: AdvertisedPrinter
 	document: Buffer
 }
 
@@ -98,25 +101,37 @@ function mediaColCollection(widthHmm: number): IppAttribute {
 	}
 }
 
-function buildPrinterAttributes(printerUri: string): IppGroup {
-	const cfg = getConfig()
-	const uuid = `urn:uuid:${cfg.printerUuid}`
-	const mediaWidthHmm = paperWidthHmm(cfg.paperWidthDots)
+/** Map the monitored primary-printer status to an IPP state + reason. */
+function ippState(targetIp: string): { printerState: number; stateReasons: string } {
+	const s = getPrinterStatus()
+	if (s.reachable === null) return { printerState: 3, stateReasons: 'none' } // not probed yet
+	if (!s.reachable) return { printerState: 5, stateReasons: targetIp ? 'connecting-to-device' : 'other' }
+	if (s.paperOut) return { printerState: 5, stateReasons: 'media-empty' }
+	if (s.coverOpen) return { printerState: 5, stateReasons: 'cover-open' }
+	if (!s.online) return { printerState: 5, stateReasons: 'moving-to-paused' }
+	return { printerState: 3, stateReasons: 'none' }
+}
 
-	// Reflect whether the downstream thermal printer is reachable, so the OS shows
-	// the queue as idle vs. stopped/offline. `null` (not yet probed) is optimistic.
-	const online = getPrinterStatus().reachable !== false
-	const printerState = online ? 3 : 5 // idle vs. stopped
-	const stateReasons = online ? 'none' : cfg.printerIp ? 'connecting-to-device' : 'other'
+function buildPrinterAttributes(printerUri: string, printer: AdvertisedPrinter): IppGroup {
+	const cfg = getConfig()
+	const uuid = `urn:uuid:${printer.uuid}`
+	const mediaWidthHmm = paperWidthHmm(cfg.paperWidthDots)
 	const mediaName = `om_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm`
+
+	// Reflect the downstream printer's condition (offline / out of paper / cover
+	// open) so the OS shows the queue accordingly. We only actively monitor the
+	// primary printer; extra queues are optimistically idle.
+	const { printerState, stateReasons } = printer.primary
+		? ippState(printer.targetIp)
+		: { printerState: 3, stateReasons: 'none' }
 
 	const attributes: IppAttribute[] = [
 		attr.uri('printer-uri-supported', printerUri),
 		attr.keyword('uri-authentication-supported', 'none'),
 		attr.keyword('uri-security-supported', 'none'),
-		attr.name('printer-name', cfg.printerName),
-		attr.text('printer-info', cfg.printerName),
-		attr.text('printer-make-and-model', 'Thermal Printer (ESC/POS bridge)'),
+		attr.name('printer-name', printer.name),
+		attr.text('printer-info', printer.name),
+		attr.text('printer-make-and-model', MAKE_AND_MODEL),
 		attr.text('printer-location', ''),
 		attr.uri('printer-uuid', uuid),
 		attr.enum('printer-state', printerState),
@@ -226,32 +241,25 @@ function jobGroup(job: Job, printerUri: string): IppGroup {
 // --- Job processing ----------------------------------------------------------
 
 async function processJob(job: Job): Promise<void> {
-	const cfg = getConfig()
-	if (!cfg.printerIp) {
+	const ip = job.target.targetIp
+	if (!ip) {
 		job.state = 8 // aborted
-		console.error('IPP job přijat, ale není nastavená IP termální tiskárny (printerIp).')
+		console.error('IPP job přijat, ale tiskárna nemá nastavenou cílovou IP.')
 		logJob({ source: 'ipp', printerIp: '', name: job.name, status: 'error', error: 'Není nastavená cílová tiskárna' })
+		job.document = Buffer.alloc(0)
 		return
 	}
 	try {
 		job.state = 5 // processing
 		// The OS sends either raster (PWG/URF) or PDF; sniff the magic bytes.
 		const isPdf = job.document.subarray(0, 5).toString('latin1') === '%PDF-'
-		const pages = isPdf ? await renderPdfToPages(job.document, cfg.paperWidthDots) : decodeRaster(job.document)
-		await printRasterPages(cfg.printerIp, pages, job.copies)
+		const pages = isPdf ? await renderPdfToPages(job.document, getConfig().paperWidthDots) : decodeRaster(job.document)
+		const payload = await buildRasterPayload(pages, job.copies)
+		// The queue serializes + retries + logs the job (with payload for reprint).
+		await enqueuePrint(ip, payload, { source: 'ipp', name: job.name, pages: pages.length })
 		job.state = 9 // completed
-		console.log(`IPP job ${job.id}: vytištěno ${pages.length} stran ×${job.copies} na ${cfg.printerIp}`)
-		logJob({ source: 'ipp', printerIp: cfg.printerIp, name: job.name, pages: pages.length, status: 'ok' })
-	} catch (err) {
-		job.state = 8 // aborted
-		console.error(`IPP job ${job.id} selhal:`, err)
-		logJob({
-			source: 'ipp',
-			printerIp: cfg.printerIp,
-			name: job.name,
-			status: 'error',
-			error: err instanceof Error ? err.message : 'Chyba tisku',
-		})
+	} catch {
+		job.state = 8 // aborted (already logged by the queue)
 	} finally {
 		job.document = Buffer.alloc(0) // free memory
 	}
@@ -262,6 +270,8 @@ async function processJob(job: Job): Promise<void> {
 export interface IppContext {
 	/** Absolute printer URI, e.g. ipp://192.168.1.10:6310/ipp/print */
 	printerUri: string
+	/** The advertised printer this request is addressed to (resolved from the path). */
+	printer: AdvertisedPrinter
 }
 
 export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<Buffer> {
@@ -281,7 +291,7 @@ export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<B
 
 	switch (req.code) {
 		case Op.GetPrinterAttributes:
-			return encode(response(req, Status.ok, [buildPrinterAttributes(ctx.printerUri)]))
+			return encode(response(req, Status.ok, [buildPrinterAttributes(ctx.printerUri, ctx.printer)]))
 
 		case Op.ValidateJob:
 			return encode(response(req, Status.ok))
@@ -294,6 +304,7 @@ export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<B
 				name: typeof nameVal?.value === 'string' ? nameVal.value : 'Print job',
 				createdAt: Date.now(),
 				copies: readCopies(req),
+				target: ctx.printer,
 				document: req.data,
 			}
 			jobs.set(job.id, job)
@@ -310,6 +321,7 @@ export async function handleIppRequest(body: Buffer, ctx: IppContext): Promise<B
 				name: typeof nameVal?.value === 'string' ? nameVal.value : 'Print job',
 				createdAt: Date.now(),
 				copies: readCopies(req),
+				target: ctx.printer,
 				document: Buffer.alloc(0),
 			}
 			jobs.set(job.id, job)

@@ -5,19 +5,46 @@ import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { DITHER_ALGORITHMS, getConfig, removePrinter, setConfig, upsertPrinter } from './config.js'
+import {
+  addVirtualPrinter,
+  DITHER_ALGORITHMS,
+  getAdvertisedPrinters,
+  getConfig,
+  removePrinter,
+  removeVirtualPrinter,
+  setConfig,
+  updateVirtualPrinter,
+  upsertPrinter,
+} from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
-import { getJobLog, logJob } from './jobs-log.js'
+import { getJobEntry, getJobLog, getJobPayload } from './jobs-log.js'
+import { enqueuePrint } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
-import { printImage, printTestReceipt } from './printer.js'
+import type { MdnsHandle } from './ipp/mdns.js'
+import { buildImagesPayload, buildTestPayload, sendEscPos } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const publicDir = join(__dirname, '..', 'public')
 
 // Live runtime status for /health.
-const runtime = { ippPort: 0, ippRunning: false, mdnsAdvertising: false }
+const runtime: { ippPort: number; ippRunning: boolean; mdnsAdvertising: boolean; mdns?: MdnsHandle } = {
+  ippPort: 0,
+  ippRunning: false,
+  mdnsAdvertising: false,
+}
+
+/** Re-advertise mDNS after the set of virtual printers changes. */
+async function readvertise(): Promise<void> {
+  if (!runtime.ippRunning) return
+  try {
+    await runtime.mdns?.stop()
+    runtime.mdns = startMdns({ port: runtime.ippPort })
+  } catch (err) {
+    console.error('Nepodařilo se znovu ohlásit tiskárny přes mDNS:', err)
+  }
+}
 
 const app = new Hono()
 
@@ -40,30 +67,21 @@ app.post('/print', async (c) => {
   const copies = Math.max(1, Math.min(99, parseInt(copiesRaw as string) || 1))
 
   return stream(c, async (s) => {
-    for (let i = 0; i < imageFiles.length; i++) {
-      const image = imageFiles[i]
-      if (!(image instanceof File)) continue
-
-      await s.write(JSON.stringify({
-        type: 'progress',
-        current: i + 1,
-        total: imageFiles.length,
-        name: image.name,
-      }) + '\n')
-
-      try {
-        const buffer = Buffer.from(await image.arrayBuffer())
-        await printImage(ip, buffer, copies)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Chyba při tisku'
-        logJob({ source: 'web', printerIp: ip, name: image.name, status: 'error', error: message })
-        await s.write(JSON.stringify({ type: 'error', message }) + '\n')
-        return
+    await s.write(JSON.stringify({ type: 'progress', current: 1, total: 1, name: 'příprava' }) + '\n')
+    try {
+      const buffers: Buffer[] = []
+      for (const image of imageFiles) {
+        if (image instanceof File) buffers.push(Buffer.from(await image.arrayBuffer()))
       }
+      const payload = await buildImagesPayload(buffers, copies)
+      // The queue serializes with other jobs, retries if the printer is briefly
+      // offline, and logs the job (with payload for reprint).
+      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length })
+      await s.write(JSON.stringify({ type: 'done' }) + '\n')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chyba při tisku'
+      await s.write(JSON.stringify({ type: 'error', message }) + '\n')
     }
-
-    logJob({ source: 'web', printerIp: ip, name: `${imageFiles.length}× obrázek`, pages: imageFiles.length, status: 'ok' })
-    await s.write(JSON.stringify({ type: 'done' }) + '\n')
   })
 })
 
@@ -151,18 +169,39 @@ app.get('/discover/stream', (c) =>
 // Recent print jobs across all channels (IPP / web / test).
 app.get('/jobs', (c) => c.json({ jobs: getJobLog() }))
 
+// Re-print a previous job from its retained payload.
+app.post('/jobs/:id/reprint', async (c) => {
+  const id = Number(c.req.param('id'))
+  const entry = getJobEntry(id)
+  const payload = getJobPayload(id)
+  if (!entry || !payload) return c.json({ error: 'Úloha nebo její data nejsou k dispozici' }, 404)
+  try {
+    await enqueuePrint(entry.printerIp, payload, { source: 'reprint', name: entry.name, pages: entry.pages })
+    return c.json({ ok: true })
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
+  }
+})
+
 // Liveness + capability status for healthchecks and debugging.
 app.get('/health', async (c) => {
   const st = getPrinterStatus()
   // Re-probe on demand when the cached value is missing or stale, so the UI badge
   // reacts within a poll rather than waiting for the background monitor.
   const fresh = st.reachable !== null && Date.now() - st.lastCheck < 5000
-  const reachable = fresh ? st.reachable : await refreshPrinterStatus()
+  if (!fresh) await refreshPrinterStatus()
+  const now = getPrinterStatus()
+  const jobs = getJobLog()
   return c.json({
     ok: true,
-    ipp: { running: runtime.ippRunning, port: runtime.ippPort },
+    ipp: {
+      running: runtime.ippRunning,
+      port: runtime.ippPort,
+      printers: getAdvertisedPrinters().map((p) => ({ name: p.name, resourcePath: p.resourcePath, targetIp: p.targetIp })),
+    },
     mdns: { advertising: runtime.mdnsAdvertising },
-    printer: { ip: st.ip, reachable },
+    printer: { ip: now.ip, reachable: now.reachable, online: now.online, paperOut: now.paperOut, coverOpen: now.coverOpen },
+    jobs: { total: jobs.length, failures: jobs.filter((j) => j.status === 'error').length },
   })
 })
 
@@ -173,29 +212,57 @@ app.post('/print-test', async (c) => {
   const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Termální tiskárna'
   if (!ip) return c.json({ error: 'IP je povinná' }, 400)
   try {
-    await printTestReceipt(ip, name, ip)
-    logJob({ source: 'test', printerIp: ip, name: `Test: ${name}`, status: 'ok' })
+    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}` })
     return c.json({ ok: true })
   } catch (err) {
-    const error = err instanceof Error ? err.message : 'Chyba tisku'
-    logJob({ source: 'test', printerIp: ip, name: `Test: ${name}`, status: 'error', error })
-    return c.json({ ok: false, error }, 502)
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
   }
 })
 
 // Print a test receipt to every discovered printer.
 app.post('/print-test-all', async (c) => {
   const printers = await discoverPrinters()
-  const results = []
-  for (const p of printers) {
-    try {
-      await printTestReceipt(p.ip, p.name ?? 'Termální tiskárna', p.ip)
-      results.push({ ip: p.ip, ok: true })
-    } catch (err) {
-      results.push({ ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' })
-    }
-  }
+  const results = await Promise.all(
+    printers.map(async (p) => {
+      const name = p.name ?? 'Termální tiskárna'
+      try {
+        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}` })
+        return { ip: p.ip, ok: true }
+      } catch (err) {
+        return { ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }
+      }
+    }),
+  )
   return c.json({ results })
+})
+
+// Extra driverless queues (each mapped to another physical printer).
+app.get('/virtual-printers', (c) => c.json({ virtualPrinters: getConfig().virtualPrinters }))
+
+app.post('/virtual-printers', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  const targetIp = typeof body.targetIp === 'string' ? body.targetIp.trim() : ''
+  if (!name || !targetIp) return c.json({ error: 'name a targetIp jsou povinné' }, 400)
+  const virtualPrinters = addVirtualPrinter(name, targetIp)
+  await readvertise()
+  return c.json({ virtualPrinters })
+})
+
+app.put('/virtual-printers/:id', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const patch: { name?: string; targetIp?: string } = {}
+  if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
+  if (typeof body.targetIp === 'string' && body.targetIp.trim()) patch.targetIp = body.targetIp.trim()
+  const virtualPrinters = updateVirtualPrinter(c.req.param('id'), patch)
+  await readvertise()
+  return c.json({ virtualPrinters })
+})
+
+app.delete('/virtual-printers/:id', async (c) => {
+  const virtualPrinters = removeVirtualPrinter(c.req.param('id'))
+  await readvertise()
+  return c.json({ virtualPrinters })
 })
 
 app.use('/*', serveStatic({ root: publicDir }))
@@ -255,9 +322,9 @@ export function startServer(
       // binds to 0.0.0.0 regardless of how the web UI is bound.
       try {
         const ipp = await startIppHttpServer({ port: options.ippPort ?? (Number(process.env.IPP_PORT) || 6310) })
-        startMdns({ port: ipp.port })
         runtime.ippPort = ipp.port
         runtime.ippRunning = true
+        runtime.mdns = startMdns({ port: ipp.port })
         runtime.mdnsAdvertising = true
         resolve({ port: info.port, ippPort: ipp.port })
       } catch (err) {
