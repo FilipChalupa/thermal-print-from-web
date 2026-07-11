@@ -2,6 +2,9 @@
   --text: #6b6375;
   --text-h: #08060d;
   --bg: #fff;
+  /* Page background (distinct from --bg so cards float). */
+  --page-bg: #f2f3f6;
+  --dot: rgba(0, 0, 0, 0.035);
   --border: #e5e4e7;
   --code-bg: #f4f3ec;
   --accent: #aa3bff;
@@ -22,7 +25,16 @@
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
-  background: var(--bg);
+  /* Soft accent glow at the top + a faint dot grid over the page colour. */
+  background-color: var(--page-bg);
+  background-image:
+    radial-gradient(900px 480px at 50% -8%, var(--accent-bg), transparent 70%),
+    radial-gradient(var(--dot) 1px, transparent 1.5px);
+  background-size:
+    auto,
+    22px 22px;
+  background-attachment: fixed;
+  min-height: 100vh;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -38,6 +50,8 @@
     --text: #9ca3af;
     --text-h: #f3f4f6;
     --bg: #16171d;
+    --page-bg: #0e0f14;
+    --dot: rgba(255, 255, 255, 0.03);
     --border: #2e303a;
     --code-bg: #1f2028;
     --accent: #c084fc;

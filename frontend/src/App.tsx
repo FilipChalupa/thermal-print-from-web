@@ -449,22 +449,6 @@ export default function App() {
       <main>
         <h1>Termální tisk</h1>
 
-        <Printers
-          printers={printers}
-          defaultPrinterId={defaultPrinterId}
-          discovered={discovered}
-          discovering={discovering}
-          onRefresh={discoverPrinters}
-          targetReachable={target?.reachable ?? null}
-          defaultBadge={badge}
-          onSetDefault={setDefault}
-          onRename={renamePrinter}
-          onRemove={removePrinter}
-          onTest={printTest}
-          onAdd={addPrinter}
-        />
-        {testMsg && <p className="test-msg">{testMsg}</p>}
-
         <form onSubmit={handleSubmit} className="print-form card">
           <h2 className="print-heading">Tisk obrázků</h2>
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
@@ -540,6 +524,22 @@ export default function App() {
 
         {status === 'success' && <p className="msg success">Odesláno do tiskárny!</p>}
         {status === 'error' && <p className="msg error">Chyba: {errorMsg}</p>}
+
+        <Printers
+          printers={printers}
+          defaultPrinterId={defaultPrinterId}
+          discovered={discovered}
+          discovering={discovering}
+          onRefresh={discoverPrinters}
+          targetReachable={target?.reachable ?? null}
+          defaultBadge={badge}
+          onSetDefault={setDefault}
+          onRename={renamePrinter}
+          onRemove={removePrinter}
+          onTest={printTest}
+          onAdd={addPrinter}
+        />
+        {testMsg && <p className="test-msg">{testMsg}</p>}
 
         <details className="settings card">
           <summary>Nastavení tisku</summary>
