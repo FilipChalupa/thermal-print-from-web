@@ -6,15 +6,16 @@ import { stream, streamSSE } from 'hono/streaming'
 import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import {
-  addVirtualPrinter,
+  addPrinter,
   DITHER_ALGORITHMS,
   getAdvertisedPrinters,
   getConfig,
+  getDefaultPrinter,
+  getPrinters,
   removePrinter,
-  removeVirtualPrinter,
   setConfig,
-  updateVirtualPrinter,
-  upsertPrinter,
+  setDefaultPrinter,
+  updatePrinter,
 } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { getJobEntry, getJobLog, getJobPayload } from './jobs-log.js'
@@ -35,8 +36,9 @@ const runtime: { ippPort: number; ippRunning: boolean; mdnsAdvertising: boolean;
   mdnsAdvertising: false,
 }
 
-/** Re-advertise mDNS after the set of virtual printers changes. */
-async function readvertise(): Promise<void> {
+/** Re-advertise mDNS (after the printer list or default changes) and re-probe. */
+async function onPrintersChanged(): Promise<void> {
+  void refreshPrinterStatus()
   if (!runtime.ippRunning) return
   try {
     await runtime.mdns?.stop()
@@ -85,13 +87,10 @@ app.post('/print', async (c) => {
   })
 })
 
-// Configuration for the virtual (driverless) printer: the target thermal
-// printer IP and the advertised name. Used by IPP jobs, which carry no IP.
+// Global print settings (image processing). Printers are managed via /printers.
 function publicConfig() {
   const cfg = getConfig()
   return {
-    printerIp: cfg.printerIp,
-    printerName: cfg.printerName,
     paperWidthDots: cfg.paperWidthDots,
     ditherAlgorithm: cfg.ditherAlgorithm,
     brightness: cfg.brightness,
@@ -106,33 +105,53 @@ app.get('/config', (c) => c.json(publicConfig()))
 app.post('/config', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const patch: Partial<ReturnType<typeof getConfig>> = {}
-  if (typeof body.printerIp === 'string') patch.printerIp = body.printerIp.trim()
-  if (typeof body.printerName === 'string' && body.printerName.trim()) patch.printerName = body.printerName.trim()
   if (body.paperWidthDots === 384 || body.paperWidthDots === 576) patch.paperWidthDots = body.paperWidthDots
   if (DITHER_ALGORITHMS.includes(body.ditherAlgorithm)) patch.ditherAlgorithm = body.ditherAlgorithm
   if (typeof body.brightness === 'number') patch.brightness = clamp(body.brightness, -100, 100)
   if (typeof body.contrast === 'number') patch.contrast = clamp(body.contrast, -100, 100)
   setConfig(patch)
-  if (patch.printerIp !== undefined) void refreshPrinterStatus() // re-check the new target
   return c.json(publicConfig())
 })
 
-// Saved / renamed printers, kept across reloads.
-app.get('/printers', (c) => c.json({ printers: getConfig().printers }))
+// Configured network printers — each is its own driverless (AirPrint) queue; the
+// default one (defaultPrinterId) takes the canonical path and pre-selects prints.
+function printersResponse() {
+  const cfg = getConfig()
+  return { printers: cfg.printers, defaultPrinterId: cfg.defaultPrinterId }
+}
 
-app.put('/printers', async (c) => {
+app.get('/printers', (c) => c.json(printersResponse()))
+
+app.post('/printers', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
   const name = typeof body.name === 'string' ? body.name.trim() : ''
-  if (!ip || !name) return c.json({ error: 'ip a name jsou povinné' }, 400)
-  return c.json({ printers: upsertPrinter(ip, name) })
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
+  if (!name || !ip) return c.json({ error: 'name a ip jsou povinné' }, 400)
+  const printer = addPrinter(name, ip)
+  await onPrintersChanged()
+  return c.json({ ...printersResponse(), printer })
 })
 
-app.delete('/printers', async (c) => {
+app.put('/printers/:id', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
-  if (!ip) return c.json({ error: 'ip je povinná' }, 400)
-  return c.json({ printers: removePrinter(ip) })
+  const patch: { name?: string; ip?: string } = {}
+  if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
+  if (typeof body.ip === 'string' && body.ip.trim()) patch.ip = body.ip.trim()
+  updatePrinter(c.req.param('id'), patch)
+  await onPrintersChanged()
+  return c.json(printersResponse())
+})
+
+app.delete('/printers/:id', async (c) => {
+  removePrinter(c.req.param('id'))
+  await onPrintersChanged()
+  return c.json(printersResponse())
+})
+
+app.post('/printers/:id/default', async (c) => {
+  setDefaultPrinter(c.req.param('id'))
+  await onPrintersChanged()
+  return c.json(printersResponse())
 })
 
 // Auto-discovery of nearby thermal printers (mDNS + port-9100 sweep) to power
@@ -236,35 +255,6 @@ app.post('/print-test-all', async (c) => {
   return c.json({ results })
 })
 
-// Extra driverless queues (each mapped to another physical printer).
-app.get('/virtual-printers', (c) => c.json({ virtualPrinters: getConfig().virtualPrinters }))
-
-app.post('/virtual-printers', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  const name = typeof body.name === 'string' ? body.name.trim() : ''
-  const targetIp = typeof body.targetIp === 'string' ? body.targetIp.trim() : ''
-  if (!name || !targetIp) return c.json({ error: 'name a targetIp jsou povinné' }, 400)
-  const virtualPrinters = addVirtualPrinter(name, targetIp)
-  await readvertise()
-  return c.json({ virtualPrinters })
-})
-
-app.put('/virtual-printers/:id', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  const patch: { name?: string; targetIp?: string } = {}
-  if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
-  if (typeof body.targetIp === 'string' && body.targetIp.trim()) patch.targetIp = body.targetIp.trim()
-  const virtualPrinters = updateVirtualPrinter(c.req.param('id'), patch)
-  await readvertise()
-  return c.json({ virtualPrinters })
-})
-
-app.delete('/virtual-printers/:id', async (c) => {
-  const virtualPrinters = removeVirtualPrinter(c.req.param('id'))
-  await readvertise()
-  return c.json({ virtualPrinters })
-})
-
 app.use('/*', serveStatic({ root: publicDir }))
 app.use('/*', serveStatic({ path: join(publicDir, 'index.html') }))
 
@@ -283,12 +273,12 @@ export interface ServerHandle {
  */
 async function autoConfigurePrinter(): Promise<void> {
   try {
-    const printers = await discoverPrinters()
-    if (getConfig().printerIp) return
-    const pick = pickDefaultPrinter(printers)
+    if (getPrinters().length > 0) return
+    const pick = pickDefaultPrinter(await discoverPrinters())
     if (pick) {
-      setConfig({ printerIp: pick.ip })
-      console.log(`Automaticky vybrána tiskárna pro systémový tisk: ${pick.name ?? pick.ip} (${pick.ip})`)
+      addPrinter(pick.name ?? 'Termální tiskárna', pick.ip)
+      console.log(`Automaticky přidána tiskárna: ${pick.name ?? pick.ip} (${pick.ip})`)
+      await onPrintersChanged()
     }
   } catch (err) {
     console.error('Automatická volba tiskárny selhala:', err)

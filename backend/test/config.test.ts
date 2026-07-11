@@ -15,25 +15,24 @@ describe('config', () => {
 		expect(cfg.paperWidthHmm(384)).toBe(5800) // 58 mm
 	})
 
-	it('mints and persists a stable UUID', () => {
-		const uuid = cfg.getConfig().printerUuid
-		expect(uuid).toMatch(/[0-9a-f-]{36}/)
-		expect(cfg.getConfig().printerUuid).toBe(uuid) // stable across calls
-	})
+	it('adds printers, keeps the first as default, and mints stable UUIDs', () => {
+		cfg.setConfig({ printers: [], defaultPrinterId: '' })
+		const first = cfg.addPrinter('Kuchyně', '10.0.0.5')
+		const second = cfg.addPrinter('Bar', '10.0.0.9')
+		expect(first.uuid).toMatch(/[0-9a-f-]{36}/)
+		expect(cfg.getDefaultPrinter()?.id).toBe(first.id) // first one is default
+		expect(cfg.getConfig().printers.map((p) => p.ip)).toEqual(['10.0.0.5', '10.0.0.9'])
 
-	it('upserts and removes saved printers, keyed by IP', () => {
-		cfg.upsertPrinter('10.0.0.5', 'Kuchyně')
-		cfg.upsertPrinter('10.0.0.9', 'Bar')
-		expect(cfg.getConfig().printers.map((p) => p.ip).sort()).toEqual(['10.0.0.5', '10.0.0.9'])
+		// Renaming keeps id + uuid.
+		cfg.updatePrinter(first.id, { name: 'Kuchyně 2' })
+		const renamed = cfg.getPrinters().find((p) => p.id === first.id)!
+		expect(renamed.name).toBe('Kuchyně 2')
+		expect(renamed.uuid).toBe(first.uuid)
 
-		// Upsert same IP renames rather than duplicates.
-		cfg.upsertPrinter('10.0.0.5', 'Kuchyně 2')
-		const kitchen = cfg.getConfig().printers.filter((p) => p.ip === '10.0.0.5')
-		expect(kitchen).toHaveLength(1)
-		expect(kitchen[0].name).toBe('Kuchyně 2')
-
-		cfg.removePrinter('10.0.0.5')
-		expect(cfg.getConfig().printers.map((p) => p.ip)).toEqual(['10.0.0.9'])
+		// Removing the default promotes the next printer.
+		cfg.removePrinter(first.id)
+		expect(cfg.getPrinters().map((p) => p.ip)).toEqual(['10.0.0.9'])
+		expect(cfg.getDefaultPrinter()?.id).toBe(second.id)
 	})
 
 	it('persists changes to disk', () => {
@@ -42,21 +41,37 @@ describe('config', () => {
 		expect(cfg.getConfig().brightness).toBe(20)
 	})
 
-	it('advertises the primary printer plus virtual ones on distinct paths', () => {
-		cfg.setConfig({ printerName: 'Primary', printerIp: '10.0.0.1' })
-		const extras = cfg.addVirtualPrinter('Bar', '10.0.0.2')
-		const id = extras[0].id
+	it('advertises the default on the canonical path and others on /<id>', () => {
+		cfg.setConfig({ printers: [], defaultPrinterId: '' })
+		const primary = cfg.addPrinter('Primary', '10.0.0.1')
+		const bar = cfg.addPrinter('Bar', '10.0.0.2')
 
 		const advertised = cfg.getAdvertisedPrinters()
-		expect(advertised[0]).toMatchObject({ name: 'Primary', targetIp: '10.0.0.1', resourcePath: 'ipp/print', primary: true })
-		expect(advertised[1]).toMatchObject({ name: 'Bar', targetIp: '10.0.0.2', resourcePath: `ipp/print/${id}`, primary: false })
+		expect(advertised.find((p) => p.targetIp === '10.0.0.1')).toMatchObject({ resourcePath: 'ipp/print', primary: true })
+		expect(advertised.find((p) => p.targetIp === '10.0.0.2')).toMatchObject({ resourcePath: `ipp/print/${bar.id}`, primary: false })
 
-		// Each advertised printer resolves back from its request path.
-		expect(cfg.resolveAdvertisedPrinter(`/ipp/print/${id}`).targetIp).toBe('10.0.0.2')
+		expect(cfg.resolveAdvertisedPrinter(`/ipp/print/${bar.id}`).targetIp).toBe('10.0.0.2')
 		expect(cfg.resolveAdvertisedPrinter('/ipp/print').primary).toBe(true)
-		expect(cfg.resolveAdvertisedPrinter('/unknown').primary).toBe(true) // falls back to primary
+		expect(cfg.resolveAdvertisedPrinter('/unknown').primary).toBe(true) // falls back to default
 
-		cfg.removeVirtualPrinter(id)
-		expect(cfg.getAdvertisedPrinters()).toHaveLength(1)
+		// Changing the default moves the canonical path.
+		cfg.setDefaultPrinter(bar.id)
+		expect(cfg.resolveAdvertisedPrinter('/ipp/print').targetIp).toBe('10.0.0.2')
+		expect(cfg.getAdvertisedPrinters().find((p) => p.targetIp === '10.0.0.1')?.resourcePath).toBe(`ipp/print/${primary.id}`)
+	})
+
+	it('migrates a legacy config (printerIp + virtualPrinters + saved) into one list', () => {
+		const { printers, defaultPrinterId } = cfg.migratePrinters({
+			printerIp: '10.0.0.1',
+			printerName: 'Hlavní',
+			printerUuid: 'uuid-primary',
+			virtualPrinters: [{ id: 'v1', name: 'Bar', targetIp: '10.0.0.2', uuid: 'uuid-bar' }],
+			printers: [{ ip: '10.0.0.3', name: 'Sklad' }],
+		})
+		expect(printers.map((p) => p.ip).sort()).toEqual(['10.0.0.1', '10.0.0.2', '10.0.0.3'])
+		const def = printers.find((p) => p.id === defaultPrinterId)!
+		expect(def.ip).toBe('10.0.0.1') // legacy primary becomes default
+		expect(def.uuid).toBe('uuid-primary') // uuid preserved
+		expect(printers.find((p) => p.ip === '10.0.0.2')?.uuid).toBe('uuid-bar') // virtual uuid preserved
 	})
 })

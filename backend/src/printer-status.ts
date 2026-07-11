@@ -9,7 +9,7 @@
  * (cover), n=4 the paper sensor.
  */
 import { createConnection } from 'net'
-import { getConfig } from './config.js'
+import { getDefaultPrinter } from './config.js'
 
 const PRINT_PORT = 9100
 
@@ -87,15 +87,17 @@ export function probeStatus(ip: string): Promise<Omit<PrinterStatus, 'ip' | 'las
 }
 
 export async function refreshPrinterStatus(): Promise<PrinterStatus> {
-	const ip = getConfig().printerIp
+	const ip = getDefaultPrinter()?.ip ?? ''
 	const s = await probeStatus(ip)
+	// Ignore a stale result if the default printer changed while we were probing.
+	if ((getDefaultPrinter()?.ip ?? '') !== ip) return status
 	status = { ip, ...s, lastCheck: Date.now() }
 	return status
 }
 
 export function getPrinterStatus(): PrinterStatus {
 	// Keep the reported IP in sync even before the first probe.
-	return { ...status, ip: getConfig().printerIp }
+	return { ...status, ip: getDefaultPrinter()?.ip ?? '' }
 }
 
 /** True when the printer is reachable, online and has no paper/cover fault. */

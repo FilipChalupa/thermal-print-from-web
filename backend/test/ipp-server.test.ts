@@ -85,7 +85,7 @@ describe('IPP server', () => {
 	})
 
 	it('reflects reachability in printer-state', async () => {
-		config.setConfig({ printerIp: '127.0.0.1' })
+		config.setConfig({ printers: [{ id: 't', name: 'P', ip: '127.0.0.1', uuid: 'u' }], defaultPrinterId: 't' })
 
 		await status.refreshPrinterStatus() // nothing listening → offline
 		let res = await request({ versionMajor: 2, versionMinor: 0, code: 0x000b, requestId: 1, groups: [opGroup()], data: Buffer.alloc(0) })
@@ -102,7 +102,7 @@ describe('IPP server', () => {
 	})
 
 	it('Print-Job honors the requested copies', async () => {
-		config.setConfig({ printerIp: '127.0.0.1', paperWidthDots: 576 })
+		config.setConfig({ printers: [{ id: 't', name: 'P', ip: '127.0.0.1', uuid: 'u' }], defaultPrinterId: 't', paperWidthDots: 576 })
 		const chunks: Buffer[] = []
 		const mock = net.createServer((s) => s.on('data', (d) => chunks.push(d)))
 		await new Promise<void>((r) => mock.listen(9100, '127.0.0.1', r))

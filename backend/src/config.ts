@@ -4,24 +4,21 @@ import { homedir } from 'os'
 import { join } from 'path'
 
 /**
- * Small persisted config. Unlike the web flow (where the target printer IP comes
- * from the form on every request), driverless IPP jobs arrive with no IP, so the
- * destination thermal printer must be configured once and remembered.
+ * Persisted config. The core is a single list of network printers — each is
+ * advertised as its own driverless (AirPrint / IPP Everywhere) queue and forwards
+ * to a physical ESC/POS printer. One printer is the default (the "star"): it takes
+ * the canonical `ipp/print` path and pre-selects the manual web print.
  */
-export interface SavedPrinter {
-	ip: string
-	name: string
-}
-
-/** An additional driverless queue mapped to another physical printer. */
-export interface VirtualPrinter {
+export interface NetworkPrinter {
 	id: string
 	name: string
-	targetIp: string
+	/** IP of the physical ESC/POS printer this queue forwards to. */
+	ip: string
+	/** Stable UUID advertised over IPP so clients recognise the same printer. */
 	uuid: string
 }
 
-/** A printer advertised over mDNS + IPP (the primary one plus any extras). */
+/** A printer as advertised over mDNS + IPP. */
 export interface AdvertisedPrinter {
 	name: string
 	uuid: string
@@ -31,28 +28,24 @@ export interface AdvertisedPrinter {
 }
 
 export interface Config {
-	/** IP of the physical ESC/POS thermal printer to forward jobs to. */
-	printerIp: string
-	/** Name advertised on the network for the virtual driverless printer. */
-	printerName: string
-	/** Stable UUID advertised over IPP so clients recognise the same printer. */
-	printerUuid: string
 	/** Print width in dots: 576 for 80 mm paper, 384 for 58 mm (both @ 203 dpi). */
 	paperWidthDots: number
-	/** User-saved / renamed printers, kept across reloads even if not rediscovered. */
-	printers: SavedPrinter[]
 	/** Halftoning algorithm applied when converting images to 1-bit. */
 	ditherAlgorithm: DitherAlgorithm
 	/** Brightness adjustment, -100…100 (applied before dithering). */
 	brightness: number
 	/** Contrast adjustment, -100…100 (applied before dithering). */
 	contrast: number
-	/** Additional driverless queues, each mapped to another physical printer. */
-	virtualPrinters: VirtualPrinter[]
+	/** All configured network printers (each its own driverless queue). */
+	printers: NetworkPrinter[]
+	/** Id of the default printer (the "star"). */
+	defaultPrinterId: string
 }
 
 export type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
 export const DITHER_ALGORITHMS: DitherAlgorithm[] = ['floyd', 'atkinson', 'ordered', 'threshold']
+
+const DEFAULT_NAME = process.env.PRINTER_NAME || 'Thermal Printer'
 
 /** Physical paper width (hundredths of mm) advertised over IPP, per print width. */
 export function paperWidthHmm(dots: number): number {
@@ -61,32 +54,85 @@ export function paperWidthHmm(dots: number): number {
 
 const CONFIG_PATH = process.env.THERMAL_CONFIG_PATH || join(homedir(), '.thermal-print-config.json')
 
-const defaults: Config = {
-	printerIp: process.env.PRINTER_IP || '',
-	printerName: process.env.PRINTER_NAME || 'Thermal Printer',
-	printerUuid: '',
-	paperWidthDots: Number(process.env.PAPER_WIDTH_DOTS) || 576,
-	printers: [],
-	ditherAlgorithm: 'floyd',
-	brightness: 0,
-	contrast: 0,
-	virtualPrinters: [],
+const newId = () => randomUUID().slice(0, 8)
+
+/**
+ * Build the printer list from a raw config object, migrating older shapes
+ * (top-level printerIp/printerName/printerUuid, virtualPrinters[], saved
+ * printers[{ip,name}]) into the unified list.
+ */
+export function migratePrinters(raw: Record<string, unknown>): { printers: NetworkPrinter[]; defaultPrinterId: string } {
+	const list: NetworkPrinter[] = []
+	const byIp = new Set<string>()
+	let defaultId = ''
+
+	const add = (id: string | undefined, name: unknown, ip: unknown, uuid: unknown): string | undefined => {
+		if (typeof ip !== 'string' || !ip || byIp.has(ip)) return undefined
+		byIp.add(ip)
+		const printer: NetworkPrinter = {
+			id: id || newId(),
+			name: typeof name === 'string' && name.trim() ? name : DEFAULT_NAME,
+			ip,
+			uuid: typeof uuid === 'string' && uuid ? uuid : randomUUID(),
+		}
+		list.push(printer)
+		return printer.id
+	}
+
+	// New-shape entries first (preserve ids/uuids).
+	if (Array.isArray(raw.printers)) {
+		for (const p of raw.printers) {
+			if (p && typeof p.id === 'string' && typeof p.ip === 'string') add(p.id, p.name, p.ip, p.uuid)
+		}
+	}
+	// Legacy primary.
+	if (typeof raw.printerIp === 'string' && raw.printerIp) {
+		const id = byIp.has(raw.printerIp)
+			? list.find((p) => p.ip === raw.printerIp)?.id
+			: add(newId(), raw.printerName, raw.printerIp, raw.printerUuid)
+		if (id && !defaultId) defaultId = id
+	}
+	// Legacy virtual printers.
+	if (Array.isArray(raw.virtualPrinters)) {
+		for (const vp of raw.virtualPrinters) add(vp?.id, vp?.name, vp?.targetIp, vp?.uuid)
+	}
+	// Legacy saved printers ({ ip, name } without id).
+	if (Array.isArray(raw.printers)) {
+		for (const p of raw.printers) if (p && !p.id && typeof p.ip === 'string') add(undefined, p.name, p.ip, undefined)
+	}
+	// Fresh install seeded from env.
+	if (list.length === 0 && process.env.PRINTER_IP) add(undefined, DEFAULT_NAME, process.env.PRINTER_IP, undefined)
+
+	if (typeof raw.defaultPrinterId === 'string' && list.some((p) => p.id === raw.defaultPrinterId)) {
+		defaultId = raw.defaultPrinterId
+	}
+	if (!defaultId) defaultId = list[0]?.id ?? ''
+	return { printers: list, defaultPrinterId: defaultId }
 }
 
 let cache: Config | null = null
 
 export function getConfig(): Config {
 	if (cache) return cache
-	let loaded: Config
+	let raw: Record<string, unknown> = {}
 	try {
-		loaded = { ...defaults, ...JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) }
+		raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
 	} catch {
-		loaded = { ...defaults }
+		/* no config yet */
 	}
-	cache = loaded
-	// Mint and persist a stable UUID on first run.
-	if (!loaded.printerUuid) return setConfig({ printerUuid: randomUUID() })
-	return loaded
+	const { printers, defaultPrinterId } = migratePrinters(raw)
+	cache = {
+		paperWidthDots: Number(raw.paperWidthDots) || Number(process.env.PAPER_WIDTH_DOTS) || 576,
+		ditherAlgorithm: DITHER_ALGORITHMS.includes(raw.ditherAlgorithm as DitherAlgorithm)
+			? (raw.ditherAlgorithm as DitherAlgorithm)
+			: 'floyd',
+		brightness: typeof raw.brightness === 'number' ? raw.brightness : 0,
+		contrast: typeof raw.contrast === 'number' ? raw.contrast : 0,
+		printers,
+		defaultPrinterId,
+	}
+	// Persist the cleaned / migrated shape once.
+	return setConfig({})
 }
 
 export function setConfig(patch: Partial<Config>): Config {
@@ -100,55 +146,66 @@ export function setConfig(patch: Partial<Config>): Config {
 	return next
 }
 
-/** Add or rename a saved printer (keyed by IP). */
-export function upsertPrinter(ip: string, name: string): SavedPrinter[] {
-	const printers = getConfig().printers.filter((p) => p.ip !== ip)
-	printers.push({ ip, name })
-	printers.sort((a, b) => a.name.localeCompare(b.name))
+// --- Printer list operations -------------------------------------------------
+
+export function getPrinters(): NetworkPrinter[] {
+	return getConfig().printers
+}
+
+/** The default printer (the "star"), or the first one as a fallback. */
+export function getDefaultPrinter(): NetworkPrinter | undefined {
+	const cfg = getConfig()
+	return cfg.printers.find((p) => p.id === cfg.defaultPrinterId) ?? cfg.printers[0]
+}
+
+export function addPrinter(name: string, ip: string): NetworkPrinter {
+	const printer: NetworkPrinter = { id: newId(), name, ip, uuid: randomUUID() }
+	const cfg = getConfig()
+	const patch: Partial<Config> = { printers: [...cfg.printers, printer] }
+	if (cfg.printers.length === 0) patch.defaultPrinterId = printer.id // first one becomes default
+	setConfig(patch)
+	return printer
+}
+
+export function updatePrinter(id: string, patch: Partial<Pick<NetworkPrinter, 'name' | 'ip'>>): NetworkPrinter[] {
+	const printers = getConfig().printers.map((p) => (p.id === id ? { ...p, ...patch } : p))
 	return setConfig({ printers }).printers
 }
 
-export function removePrinter(ip: string): SavedPrinter[] {
-	return setConfig({ printers: getConfig().printers.filter((p) => p.ip !== ip) }).printers
+export function removePrinter(id: string): Config {
+	const cfg = getConfig()
+	const printers = cfg.printers.filter((p) => p.id !== id)
+	const patch: Partial<Config> = { printers }
+	if (cfg.defaultPrinterId === id) patch.defaultPrinterId = printers[0]?.id ?? ''
+	return setConfig(patch)
 }
 
-/** All printers to advertise: the primary (from the top-level fields) plus extras. */
+export function setDefaultPrinter(id: string): Config {
+	if (!getConfig().printers.some((p) => p.id === id)) return getConfig()
+	return setConfig({ defaultPrinterId: id })
+}
+
+// --- Advertising -------------------------------------------------------------
+
+/** All printers to advertise; the default takes the canonical `ipp/print` path. */
 export function getAdvertisedPrinters(): AdvertisedPrinter[] {
-	const cfg = getConfig()
-	const primary: AdvertisedPrinter = {
-		name: cfg.printerName,
-		uuid: cfg.printerUuid,
-		targetIp: cfg.printerIp,
-		resourcePath: 'ipp/print',
-		primary: true,
-	}
-	const extras = cfg.virtualPrinters.map((p) => ({
+	const def = getDefaultPrinter()
+	return getPrinters().map((p) => ({
 		name: p.name,
 		uuid: p.uuid,
-		targetIp: p.targetIp,
-		resourcePath: `ipp/print/${p.id}`,
-		primary: false,
+		targetIp: p.ip,
+		resourcePath: p.id === def?.id ? 'ipp/print' : `ipp/print/${p.id}`,
+		primary: p.id === def?.id,
 	}))
-	return [primary, ...extras]
 }
 
-/** Resolve an advertised printer from an IPP request path (falls back to primary). */
+/** Resolve an advertised printer from an IPP request path (falls back to default). */
 export function resolveAdvertisedPrinter(path: string): AdvertisedPrinter {
 	const rp = path.replace(/^\/+/, '')
 	const all = getAdvertisedPrinters()
-	return all.find((p) => p.resourcePath === rp) ?? all[0]
-}
-
-export function addVirtualPrinter(name: string, targetIp: string): VirtualPrinter[] {
-	const printer: VirtualPrinter = { id: randomUUID().slice(0, 8), name, targetIp, uuid: randomUUID() }
-	return setConfig({ virtualPrinters: [...getConfig().virtualPrinters, printer] }).virtualPrinters
-}
-
-export function updateVirtualPrinter(id: string, patch: Partial<Pick<VirtualPrinter, 'name' | 'targetIp'>>): VirtualPrinter[] {
-	const virtualPrinters = getConfig().virtualPrinters.map((p) => (p.id === id ? { ...p, ...patch } : p))
-	return setConfig({ virtualPrinters }).virtualPrinters
-}
-
-export function removeVirtualPrinter(id: string): VirtualPrinter[] {
-	return setConfig({ virtualPrinters: getConfig().virtualPrinters.filter((p) => p.id !== id) }).virtualPrinters
+	return (
+		all.find((p) => p.resourcePath === rp) ??
+		all.find((p) => p.primary) ??
+		all[0] ?? { name: DEFAULT_NAME, uuid: '', targetIp: '', resourcePath: 'ipp/print', primary: true }
+	)
 }
