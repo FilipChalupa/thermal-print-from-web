@@ -57,9 +57,27 @@ interface JobLogEntry {
   printerIp: string
   name: string
   pages?: number
+  copies?: number
+  format?: 'image' | 'pdf' | 'raster' | 'text'
   status: 'ok' | 'error'
   error?: string
   reprintable?: boolean
+}
+
+const FORMAT_LABELS: Record<NonNullable<JobLogEntry['format']>, string> = {
+  image: 'Obrázek',
+  pdf: 'PDF',
+  raster: 'Rastr',
+  text: 'Text',
+}
+
+function jobMeta(j: JobLogEntry): string {
+  const parts = [j.printerIp || '—']
+  if (j.format) parts.push(FORMAT_LABELS[j.format])
+  if (j.copies && j.copies > 1) parts.push(`${j.copies}×`)
+  if (j.pages && j.pages > 1) parts.push(`${j.pages} str.`)
+  if (j.status === 'error' && j.error) parts.push(j.error)
+  return parts.join(' · ')
 }
 
 async function applyRotation(file: File, degrees: number): Promise<Blob> {
@@ -600,10 +618,7 @@ export default function App() {
                     <span className="job-name">
                       <span className="job-source">{jobSourceLabel(j.source)}</span> {j.name}
                     </span>
-                    <span className="job-meta">
-                      {j.printerIp || '—'}
-                      {j.status === 'error' && j.error ? ` · ${j.error}` : ''}
-                    </span>
+                    <span className="job-meta">{jobMeta(j)}</span>
                   </span>
                   <span className="job-time">{relativeTime(j.at)}</span>
                   {j.status === 'ok' && j.reprintable && (

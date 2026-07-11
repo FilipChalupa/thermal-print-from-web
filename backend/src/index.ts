@@ -134,7 +134,7 @@ app.post('/print', async (c) => {
       const payload = await buildImagesPayload(buffers, copies)
       // The queue serializes with other jobs, retries if the printer is briefly
       // offline, and logs the job (with payload for reprint).
-      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length })
+      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image' })
       await s.write(JSON.stringify({ type: 'done' }) + '\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Chyba při tisku'
@@ -252,7 +252,7 @@ app.post('/jobs/:id/reprint', async (c) => {
   const payload = getJobPayload(id)
   if (!entry || !payload) return c.json({ error: 'Úloha nebo její data nejsou k dispozici' }, 404)
   try {
-    await enqueuePrint(entry.printerIp, payload, { source: 'reprint', name: entry.name, pages: entry.pages })
+    await enqueuePrint(entry.printerIp, payload, { source: 'reprint', name: entry.name, pages: entry.pages, copies: entry.copies, format: entry.format })
     return c.json({ ok: true })
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
@@ -288,7 +288,7 @@ app.post('/print-test', async (c) => {
   const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Termální tiskárna'
   if (!ip) return c.json({ error: 'IP je povinná' }, 400)
   try {
-    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}` })
+    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text' })
     return c.json({ ok: true })
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
@@ -302,7 +302,7 @@ app.post('/print-test-all', async (c) => {
     printers.map(async (p) => {
       const name = p.name ?? 'Termální tiskárna'
       try {
-        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}` })
+        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text' })
         return { ip: p.ip, ok: true }
       } catch (err) {
         return { ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }

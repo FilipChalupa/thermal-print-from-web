@@ -10,6 +10,8 @@ import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { log } from './log.js'
 
+export type JobFormat = 'image' | 'pdf' | 'raster' | 'text'
+
 export interface JobLogEntry {
 	id: number
 	at: number
@@ -17,6 +19,8 @@ export interface JobLogEntry {
 	printerIp: string
 	name: string
 	pages?: number
+	copies?: number
+	format?: JobFormat
 	status: 'ok' | 'error'
 	error?: string
 }

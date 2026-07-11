@@ -9,6 +9,7 @@
  * the payload retained so it can be re-printed.
  */
 import { logJob } from './jobs-log.js'
+import type { JobFormat } from './jobs-log.js'
 import { tcpReachable } from './printer-status.js'
 import { sendEscPos } from './printer.js'
 
@@ -16,6 +17,8 @@ export interface PrintMeta {
 	source: 'ipp' | 'web' | 'test' | 'reprint'
 	name: string
 	pages?: number
+	copies?: number
+	format?: JobFormat
 }
 
 interface QueueItem {
@@ -51,13 +54,14 @@ async function drain(ip: string): Promise<void> {
 		const q = queues.get(ip)
 		while (q && q.length) {
 			const item = q[0]
+			const { source, name, pages, copies, format } = item.meta
 			try {
 				await deliver(ip, item.payload)
-				logJob({ source: item.meta.source, printerIp: ip, name: item.meta.name, pages: item.meta.pages, status: 'ok' }, item.payload)
+				logJob({ source, printerIp: ip, name, pages, copies, format, status: 'ok' }, item.payload)
 				item.resolve()
 			} catch (err) {
 				const error = err instanceof Error ? err.message : 'Chyba tisku'
-				logJob({ source: item.meta.source, printerIp: ip, name: item.meta.name, pages: item.meta.pages, status: 'error', error })
+				logJob({ source, printerIp: ip, name, pages, copies, format, status: 'error', error })
 				notifyFailure(ip, item.meta.name, error)
 				item.reject(err instanceof Error ? err : new Error(error))
 			}

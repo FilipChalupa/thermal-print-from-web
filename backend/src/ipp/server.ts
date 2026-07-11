@@ -257,7 +257,13 @@ async function processJob(job: Job): Promise<void> {
 		const pages = isPdf ? await renderPdfToPages(job.document, getConfig().paperWidthDots) : decodeRaster(job.document)
 		const payload = await buildRasterPayload(pages, job.copies)
 		// The queue serializes + retries + logs the job (with payload for reprint).
-		await enqueuePrint(ip, payload, { source: 'ipp', name: job.name, pages: pages.length })
+		await enqueuePrint(ip, payload, {
+			source: 'ipp',
+			name: job.name,
+			pages: pages.length,
+			copies: job.copies,
+			format: isPdf ? 'pdf' : 'raster',
+		})
 		job.state = 9 // completed
 	} catch {
 		job.state = 8 // aborted (already logged by the queue)
