@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
+import { networkInterfaces } from 'os'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { stream, streamSSE } from 'hono/streaming'
@@ -22,19 +23,25 @@ import { getJobEntry, getJobLog, getJobPayload } from './jobs-log.js'
 import { enqueuePrint } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
+import type { IppHttpHandle } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import type { MdnsHandle } from './ipp/mdns.js'
-import { buildImagesPayload, buildTestPayload, sendEscPos } from './printer.js'
+import { buildImagesPayload, buildTestPayload } from './printer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const publicDir = join(__dirname, '..', 'public')
 
-// Live runtime status for /health.
-const runtime: { ippPort: number; ippRunning: boolean; mdnsAdvertising: boolean; mdns?: MdnsHandle } = {
-  ippPort: 0,
-  ippRunning: false,
-  mdnsAdvertising: false,
+// Live runtime state (for /health, re-advertising and graceful shutdown).
+interface Runtime {
+  ippPort: number
+  ippRunning: boolean
+  mdnsAdvertising: boolean
+  mdns?: MdnsHandle
+  ipp?: IppHttpHandle
+  webServer?: { close: (cb?: () => void) => void }
+  timers: NodeJS.Timeout[]
 }
+const runtime: Runtime = { ippPort: 0, ippRunning: false, mdnsAdvertising: false, timers: [] }
 
 /** Re-advertise mDNS (after the printer list or default changes) and re-probe. */
 async function onPrintersChanged(): Promise<void> {
@@ -46,6 +53,53 @@ async function onPrintersChanged(): Promise<void> {
   } catch (err) {
     console.error('Nepodařilo se znovu ohlásit tiskárny přes mDNS:', err)
   }
+}
+
+/** Signature of the host's non-internal IPv4 addresses. */
+function networkSignature(): string {
+  const addrs: string[] = []
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) addrs.push(a.address)
+  }
+  return addrs.sort().join(',')
+}
+
+/** Re-announce mDNS when the host's addresses change (e.g. new LAN, VPN up/down). */
+function startNetworkWatcher(): NodeJS.Timeout {
+  let last = networkSignature()
+  const timer = setInterval(() => {
+    const sig = networkSignature()
+    if (sig !== last) {
+      last = sig
+      console.log('Síť se změnila — znovu ohlašuji tiskárny přes mDNS.')
+      void onPrintersChanged()
+    }
+  }, 30_000)
+  timer.unref?.()
+  return timer
+}
+
+let shuttingDown = false
+
+/** Cleanly stop advertising and close listeners (for redeploys / Ctrl-C). */
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+  for (const t of runtime.timers) clearInterval(t)
+  runtime.timers = []
+  try {
+    await runtime.mdns?.stop()
+  } catch {
+    /* ignore */
+  }
+  runtime.mdnsAdvertising = false
+  try {
+    await runtime.ipp?.close()
+  } catch {
+    /* ignore */
+  }
+  runtime.ippRunning = false
+  await new Promise<void>((resolve) => (runtime.webServer ? runtime.webServer.close(() => resolve()) : resolve()))
 }
 
 const app = new Hono()
@@ -263,6 +317,8 @@ export interface ServerHandle {
   port: number
   /** Port of the LAN-facing IPP (virtual printer) server, if enabled. */
   ippPort?: number
+  /** Stop advertising + close all listeners. */
+  close?: () => Promise<void>
 }
 
 /**
@@ -291,20 +347,21 @@ export function startServer(
   const enableIpp = options.ipp ?? true
 
   return new Promise((resolve) => {
-    serve({
+    const webServer = serve({
       fetch: app.fetch,
       port: options.port ?? 3000,
       hostname: options.hostname,
     }, async (info) => {
+      runtime.webServer = webServer as unknown as Runtime['webServer']
       console.log(`Server is running on http://localhost:${info.port}`)
 
       // Warm discovery + auto-select a target in the background (non-blocking).
       void autoConfigurePrinter()
       // Keep the target printer's online/offline status fresh for IPP + /health.
-      startPrinterMonitor()
+      runtime.timers.push(startPrinterMonitor())
 
       if (!enableIpp) {
-        resolve({ port: info.port })
+        resolve({ port: info.port, close: shutdown })
         return
       }
 
@@ -312,14 +369,16 @@ export function startServer(
       // binds to 0.0.0.0 regardless of how the web UI is bound.
       try {
         const ipp = await startIppHttpServer({ port: options.ippPort ?? (Number(process.env.IPP_PORT) || 6310) })
+        runtime.ipp = ipp
         runtime.ippPort = ipp.port
         runtime.ippRunning = true
         runtime.mdns = startMdns({ port: ipp.port })
         runtime.mdnsAdvertising = true
-        resolve({ port: info.port, ippPort: ipp.port })
+        runtime.timers.push(startNetworkWatcher())
+        resolve({ port: info.port, ippPort: ipp.port, close: shutdown })
       } catch (err) {
         console.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
-        resolve({ port: info.port })
+        resolve({ port: info.port, close: shutdown })
       }
     })
   })
@@ -327,5 +386,14 @@ export function startServer(
 
 const isRunDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 if (isRunDirectly) {
-  startServer({ port: Number(process.env.PORT) || 3000 })
+  startServer({ port: Number(process.env.PORT) || 3000 }).then((handle) => {
+    // Stop advertising + close listeners cleanly on redeploy / Ctrl-C.
+    for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+      process.once(signal, async () => {
+        console.log(`\n${signal} — ukončuji…`)
+        await handle.close?.()
+        process.exit(0)
+      })
+    }
+  })
 }

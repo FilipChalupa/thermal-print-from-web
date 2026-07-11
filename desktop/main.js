@@ -15,7 +15,8 @@ const createWindow = () => {
 app.whenReady().then(async () => {
 	// Loopback only — the server is not reachable from other machines.
 	// Port 0 lets the OS pick a free port so we never collide with anything.
-	;({ port } = await startServer({ port: 0, hostname: '127.0.0.1' }))
+	// ipp:false — desktop app is a local UI; must NOT advertise as a network printer.
+	;({ port } = await startServer({ port: 0, hostname: '127.0.0.1', ipp: false }))
 	createWindow()
 
 	app.on('activate', () => {

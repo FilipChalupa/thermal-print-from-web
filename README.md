@@ -81,7 +81,7 @@ npm test --prefix backend
 
 ## Desktopová aplikace (Electron)
 
-Stejný backend i frontend zabalené do okna pro Windows/macOS. Server uvnitř aplikace poslouchá pouze na `127.0.0.1` s náhodným volným portem — zvenku není dostupný a nekoliduje s ničím na portu 3000.
+Stejný backend i frontend zabalené do okna pro Windows/macOS. Server uvnitř aplikace poslouchá pouze na `127.0.0.1` s náhodným volným portem — zvenku není dostupný a nekoliduje s ničím na portu 3000. Desktopová appka se navíc **neohlašuje jako síťová tiskárna** (IPP/mDNS je vypnuté) — je to lokální UI; driverless tiskárnu provozuj přes server (viz Deploy).
 
 ```bash
 npm --prefix desktop install
