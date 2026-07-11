@@ -164,7 +164,6 @@ export default function App() {
     refreshHealth()
     const id = setInterval(refreshHealth, 15000)
     return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load print settings, printers and recent jobs on mount.
@@ -181,7 +180,6 @@ export default function App() {
       .catch(() => {})
     loadPrinters()
     refreshJobs()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Live discovery over SSE: printers appear as they are found.

@@ -11,7 +11,6 @@ import {
   DITHER_ALGORITHMS,
   getAdvertisedPrinters,
   getConfig,
-  getDefaultPrinter,
   getPrinters,
   removePrinter,
   setConfig,
@@ -39,7 +38,7 @@ interface Runtime {
   mdnsAdvertising: boolean
   mdns?: MdnsHandle
   ipp?: IppHttpHandle
-  webServer?: { close: (cb?: () => void) => void }
+  webServer?: ReturnType<typeof serve>
   timers: NodeJS.Timeout[]
 }
 const runtime: Runtime = { ippPort: 0, ippRunning: false, mdnsAdvertising: false, timers: [] }
@@ -355,7 +354,7 @@ export function startServer(
       port: options.port ?? 3000,
       hostname: options.hostname,
     }, async (info) => {
-      runtime.webServer = webServer as unknown as Runtime['webServer']
+      runtime.webServer = webServer
       log.info(`Server is running on http://localhost:${info.port}`)
 
       // Restore persisted job history + enable ongoing persistence.
