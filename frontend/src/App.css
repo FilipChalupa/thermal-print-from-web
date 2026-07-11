@@ -290,18 +290,124 @@ label {
   cursor: default;
 }
 
-.default-note {
-  text-align: left;
-  font-size: 0.85rem;
-  color: var(--text);
-  margin: 0 0 6px;
+/* Cards / sections */
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
 }
 
-.default-note strong {
+.card h2,
+.printers-head h2,
+.jobs-head h2,
+.print-heading {
+  font-size: 1rem;
+  margin: 0 0 10px;
   color: var(--text-h);
 }
 
-.paper-size select {
+.print-form {
+  gap: 14px;
+}
+
+/* Copies stepper */
+.copies-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.copies-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stepper button {
+  width: 40px;
+  border: none;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.stepper button:hover:not(:disabled) {
+  background: var(--code-bg);
+}
+
+.stepper button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.stepper input {
+  width: 48px;
+  text-align: center;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 1rem;
+  padding: 8px 0;
+  -moz-appearance: textfield;
+}
+
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Print settings (collapsed) */
+.settings > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  list-style: none;
+  margin: 0;
+}
+
+.settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings > summary::before {
+  content: '▸ ';
+}
+
+.settings[open] > summary::before {
+  content: '▾ ';
+}
+
+.settings .field,
+.settings .slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.settings select {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -310,46 +416,23 @@ label {
   color: var(--text-h);
 }
 
-.adjust {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 12px;
-}
-
-.adjust > summary {
-  cursor: pointer;
-  padding: 10px 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.adjust > label {
-  margin-bottom: 12px;
-}
-
-.adjust .slider {
-  gap: 4px;
-}
-
-.adjust .slider span {
+.slider span {
   display: flex;
   justify-content: space-between;
 }
 
-.adjust .slider em {
+.slider em {
   font-style: normal;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
-.adjust input[type='range'] {
+.slider input[type='range'] {
   width: 100%;
   accent-color: #0070f3;
 }
 
 .jobs {
-  margin-top: 28px;
   text-align: left;
 }
 

@@ -43,6 +43,7 @@ interface Props {
   discovering: boolean
   onRefresh: () => void
   targetReachable: boolean | null
+  defaultBadge: { cls: 'online' | 'offline'; label: string } | null
   onSetDefault: (id: string) => void
   onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
@@ -57,6 +58,7 @@ export default function Printers({
   discovering,
   onRefresh,
   targetReachable,
+  defaultBadge,
   onSetDefault,
   onRename,
   onRemove,
@@ -81,9 +83,9 @@ export default function Printers({
   }
 
   return (
-    <section className="printers">
+    <section className="printers card">
       <div className="printers-head">
-        <h2>Tiskárny</h2>
+        <h2>Tiskárny{printers.length > 0 ? ` (${printers.length})` : ''}</h2>
         <button type="button" className="printers-refresh" onClick={onRefresh} disabled={discovering}>
           {discovering ? 'Hledám…' : '↻ Vyhledat'}
         </button>
@@ -125,6 +127,7 @@ export default function Printers({
                   <span className="p-name">
                     {p.name}
                     {isDefault && <span className="p-badge">výchozí</span>}
+                    {isDefault && defaultBadge && <span className={`reach-badge ${defaultBadge.cls}`}>{defaultBadge.label}</span>}
                   </span>
                   <span className="p-ip">{p.ip}</span>
                 </span>

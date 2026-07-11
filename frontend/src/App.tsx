@@ -456,62 +456,17 @@ export default function App() {
           discovering={discovering}
           onRefresh={discoverPrinters}
           targetReachable={target?.reachable ?? null}
+          defaultBadge={badge}
           onSetDefault={setDefault}
           onRename={renamePrinter}
           onRemove={removePrinter}
           onTest={printTest}
           onAdd={addPrinter}
         />
-        {defaultPrinter && (
-          <p className="default-note">
-            Výchozí tiskárna (systémový i web tisk): <strong>★ {defaultPrinter.name}</strong>
-            {badge && <span className={`reach-badge ${badge.cls}`}>{badge.label}</span>}
-          </p>
-        )}
         {testMsg && <p className="test-msg">{testMsg}</p>}
 
-        <form onSubmit={handleSubmit}>
-          <label className="paper-size">
-            Šířka papíru
-            <select value={paperWidthDots} onChange={(e) => changePaperWidth(Number(e.target.value))}>
-              <option value={576}>80 mm (576 bodů)</option>
-              <option value={384}>58 mm (384 bodů)</option>
-            </select>
-          </label>
-
-          <details className="adjust">
-            <summary>Úpravy obrazu</summary>
-            <label className="paper-size">
-              Dithering
-              <select
-                value={ditherAlgorithm}
-                onChange={(e) => {
-                  const v = e.target.value as DitherAlgorithm
-                  setDitherAlgorithm(v)
-                  postSettings({ ditherAlgorithm: v })
-                }}
-              >
-                {(Object.keys(DITHER_LABELS) as DitherAlgorithm[]).map((a) => (
-                  <option key={a} value={a}>
-                    {DITHER_LABELS[a]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="slider">
-              <span>
-                Jas <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
-              </span>
-              <input type="range" min={-100} max={100} value={brightness} onChange={(e) => { const v = Number(e.target.value); setBrightness(v); postSettings({ brightness: v }) }} />
-            </label>
-            <label className="slider">
-              <span>
-                Kontrast <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
-              </span>
-              <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
-            </label>
-          </details>
-
+        <form onSubmit={handleSubmit} className="print-form card">
+          <h2 className="print-heading">Tisk obrázků</h2>
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => e.target.files && addFiles(e.target.files)} style={{ display: 'none' }} />
             <p>
@@ -555,28 +510,82 @@ export default function App() {
             </>
           )}
 
-          <label>
-            Počet výtisků
-            <input type="number" value={copies} min={1} max={99} onChange={(e) => setCopies(Number(e.target.value))} />
-          </label>
+          <div className="copies-row">
+            <span className="copies-label">Počet výtisků</span>
+            <div className="stepper">
+              <button type="button" onClick={() => setCopies((c) => Math.max(1, c - 1))} aria-label="Méně" disabled={copies <= 1}>
+                −
+              </button>
+              <input
+                type="number"
+                value={copies}
+                min={1}
+                max={99}
+                onChange={(e) => setCopies(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
+              />
+              <button type="button" onClick={() => setCopies((c) => Math.min(99, c + 1))} aria-label="Více" disabled={copies >= 99}>
+                +
+              </button>
+            </div>
+          </div>
 
-          <button type="submit" disabled={status === 'loading' || items.length === 0 || !IPV4.test(defaultIp)}>
+          <button type="submit" className="print-btn" disabled={status === 'loading' || items.length === 0 || !IPV4.test(defaultIp)}>
             {status === 'loading'
               ? progress
                 ? `Tisknu ${progress.current}/${progress.total}…`
                 : 'Připravuji…'
-              : `Tisknout${items.length > 1 ? ` (${items.length} ${czPlural(items.length, ['fotka', 'fotky', 'fotek'])})` : ''}`}
+              : `Tisknout${defaultPrinter ? ` na ${defaultPrinter.name}` : ''}${items.length > 1 ? ` · ${items.length} ${czPlural(items.length, ['fotka', 'fotky', 'fotek'])}` : ''}`}
           </button>
         </form>
 
         {status === 'success' && <p className="msg success">Odesláno do tiskárny!</p>}
         {status === 'error' && <p className="msg error">Chyba: {errorMsg}</p>}
 
+        <details className="settings card">
+          <summary>Nastavení tisku</summary>
+          <label className="field">
+            Šířka papíru
+            <select value={paperWidthDots} onChange={(e) => changePaperWidth(Number(e.target.value))}>
+              <option value={576}>80 mm (576 bodů)</option>
+              <option value={384}>58 mm (384 bodů)</option>
+            </select>
+          </label>
+          <label className="field">
+            Dithering
+            <select
+              value={ditherAlgorithm}
+              onChange={(e) => {
+                const v = e.target.value as DitherAlgorithm
+                setDitherAlgorithm(v)
+                postSettings({ ditherAlgorithm: v })
+              }}
+            >
+              {(Object.keys(DITHER_LABELS) as DitherAlgorithm[]).map((a) => (
+                <option key={a} value={a}>
+                  {DITHER_LABELS[a]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="slider">
+            <span>
+              Jas <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
+            </span>
+            <input type="range" min={-100} max={100} value={brightness} onChange={(e) => { const v = Number(e.target.value); setBrightness(v); postSettings({ brightness: v }) }} />
+          </label>
+          <label className="slider">
+            <span>
+              Kontrast <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
+            </span>
+            <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
+          </label>
+        </details>
+
         {jobs.length > 0 && (
-          <section className="jobs">
+          <section className="jobs card">
             <div className="jobs-head">
               <h2>Poslední úlohy</h2>
-              <button type="button" className="jobs-refresh" onClick={refreshJobs}>
+              <button type="button" className="jobs-refresh" onClick={refreshJobs} title="Obnovit">
                 ↻
               </button>
             </div>
@@ -595,7 +604,7 @@ export default function App() {
                       {j.status === 'error' && j.error ? ` · ${j.error}` : ''}
                     </span>
                   </span>
-                  <span className="job-time">{formatTime(j.at)}</span>
+                  <span className="job-time">{relativeTime(j.at)}</span>
                   {j.status === 'ok' && (
                     <button type="button" className="job-reprint" onClick={() => reprintJob(j.id)} title="Vytisknout znovu" aria-label="Vytisknout znovu">
                       ↻
@@ -615,6 +624,11 @@ function jobSourceLabel(source: JobLogEntry['source']): string {
   return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : source === 'reprint' ? 'Přetisk' : 'Test'
 }
 
-function formatTime(at: number): string {
+function relativeTime(at: number): string {
+  const s = Math.floor((Date.now() - at) / 1000)
+  if (s < 45) return 'právě teď'
+  const m = Math.floor(s / 60)
+  if (m < 1) return 'před chvílí'
+  if (m < 60) return `před ${m} min`
   return new Date(at).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
 }
