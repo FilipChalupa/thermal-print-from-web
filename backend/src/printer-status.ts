@@ -44,7 +44,7 @@ export function tcpReachable(ip: string, timeoutMs = 800): Promise<boolean> {
 }
 
 /** Connect and read ESC/POS real-time status (paper / cover / online). */
-export function probeStatus(ip: string): Promise<Omit<PrinterStatus, 'ip' | 'lastCheck'>> {
+function probeStatus(ip: string): Promise<Omit<PrinterStatus, 'ip' | 'lastCheck'>> {
 	return new Promise((resolve) => {
 		const offline = { reachable: false, online: false, paperOut: false, coverOpen: false }
 		if (!ip) return resolve(offline)
@@ -98,11 +98,6 @@ export async function refreshPrinterStatus(): Promise<PrinterStatus> {
 export function getPrinterStatus(): PrinterStatus {
 	// Keep the reported IP in sync even before the first probe.
 	return { ...status, ip: getDefaultPrinter()?.ip ?? '' }
-}
-
-/** True when the printer is reachable, online and has no paper/cover fault. */
-export function isReady(s: PrinterStatus): boolean {
-	return s.reachable === true && s.online && !s.paperOut && !s.coverOpen
 }
 
 export function startPrinterMonitor(intervalMs = 20_000): NodeJS.Timeout {

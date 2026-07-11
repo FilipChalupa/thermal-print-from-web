@@ -160,7 +160,7 @@ function rasterPageToEscPos(page: RasterPage): Buffer[] {
   return drawableToEscPos(canvas, page.width, page.height)
 }
 
-export const PRINTER_PORT = 9100
+const PRINTER_PORT = 9100
 const INIT = Buffer.from([0x1b, 0x40]) // Initialize printer
 const CENTER_ALIGN = Buffer.from([0x1b, 0x61, 1]) // Center alignment
 const FEED = Buffer.from([0x1b, 0x64, 6]) // Feed 6 lines before cut
@@ -192,7 +192,7 @@ function assembleCopies(chunks: Buffer[], copies: number): Buffer {
 }
 
 /** Build the ESC/POS payload for one image (assembled, ready to send). */
-export async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<Buffer> {
+async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<Buffer> {
   return assembleCopies(await imageToEscPos(imageBuffer), copies)
 }
 
