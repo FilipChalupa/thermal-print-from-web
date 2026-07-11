@@ -20,6 +20,7 @@ import {
 } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { getJobEntry, getJobLog, getJobPayload } from './jobs-log.js'
+import { log } from './log.js'
 import { enqueuePrint } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
@@ -51,7 +52,7 @@ async function onPrintersChanged(): Promise<void> {
     await runtime.mdns?.stop()
     runtime.mdns = startMdns({ port: runtime.ippPort })
   } catch (err) {
-    console.error('Nepodařilo se znovu ohlásit tiskárny přes mDNS:', err)
+    log.error('Nepodařilo se znovu ohlásit tiskárny přes mDNS:', err)
   }
 }
 
@@ -71,7 +72,7 @@ function startNetworkWatcher(): NodeJS.Timeout {
     const sig = networkSignature()
     if (sig !== last) {
       last = sig
-      console.log('Síť se změnila — znovu ohlašuji tiskárny přes mDNS.')
+      log.info('Síť se změnila — znovu ohlašuji tiskárny přes mDNS.')
       void onPrintersChanged()
     }
   }, 30_000)
@@ -214,7 +215,7 @@ app.get('/discover', async (c) => {
   try {
     return c.json({ printers: await discoverPrinters() })
   } catch (err) {
-    console.error('Discovery selhalo:', err)
+    log.error('Discovery selhalo:', err)
     return c.json({ printers: [] })
   }
 })
@@ -233,7 +234,7 @@ app.get('/discover/stream', (c) =>
         await s.writeSSE({ event: 'printer', data: JSON.stringify(printer) })
       })
     } catch (err) {
-      console.error('Streaming discovery selhalo:', err)
+      log.error('Streaming discovery selhalo:', err)
     }
     await s.writeSSE({ event: 'done', data: '{}' })
   }),
@@ -333,11 +334,11 @@ async function autoConfigurePrinter(): Promise<void> {
     const pick = pickDefaultPrinter(await discoverPrinters())
     if (pick) {
       addPrinter(pick.name ?? 'Termální tiskárna', pick.ip)
-      console.log(`Automaticky přidána tiskárna: ${pick.name ?? pick.ip} (${pick.ip})`)
+      log.info(`Automaticky přidána tiskárna: ${pick.name ?? pick.ip} (${pick.ip})`)
       await onPrintersChanged()
     }
   } catch (err) {
-    console.error('Automatická volba tiskárny selhala:', err)
+    log.error('Automatická volba tiskárny selhala:', err)
   }
 }
 
@@ -353,7 +354,7 @@ export function startServer(
       hostname: options.hostname,
     }, async (info) => {
       runtime.webServer = webServer as unknown as Runtime['webServer']
-      console.log(`Server is running on http://localhost:${info.port}`)
+      log.info(`Server is running on http://localhost:${info.port}`)
 
       // Warm discovery + auto-select a target in the background (non-blocking).
       void autoConfigurePrinter()
@@ -377,7 +378,7 @@ export function startServer(
         runtime.timers.push(startNetworkWatcher())
         resolve({ port: info.port, ippPort: ipp.port, close: shutdown })
       } catch (err) {
-        console.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
+        log.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
         resolve({ port: info.port, close: shutdown })
       }
     })
@@ -390,7 +391,7 @@ if (isRunDirectly) {
     // Stop advertising + close listeners cleanly on redeploy / Ctrl-C.
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       process.once(signal, async () => {
-        console.log(`\n${signal} — ukončuji…`)
+        log.info(`\n${signal} — ukončuji…`)
         await handle.close?.()
         process.exit(0)
       })

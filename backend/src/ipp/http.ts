@@ -6,6 +6,7 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
 import type { AddressInfo } from 'net'
 import { resolveAdvertisedPrinter } from '../config.js'
+import { log } from '../log.js'
 import { handleIppRequest } from './server.js'
 
 export interface IppHttpHandle {
@@ -39,7 +40,7 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
 		res.writeHead(200, { 'Content-Type': 'application/ipp' })
 		res.end(responseBuffer)
 	} catch (err) {
-		console.error('IPP request handling failed:', err)
+		log.error('IPP request handling failed:', err)
 		res.writeHead(500)
 		res.end()
 	}
@@ -51,7 +52,7 @@ export function startIppHttpServer(options: { port: number; hostname?: string })
 		server.on('error', reject)
 		server.listen(options.port, options.hostname ?? '0.0.0.0', () => {
 			const port = (server.address() as AddressInfo).port
-			console.log(`IPP server listening on ${options.hostname ?? '0.0.0.0'}:${port}`)
+			log.info(`IPP server listening on ${options.hostname ?? '0.0.0.0'}:${port}`)
 			resolve({
 				port,
 				close: () => new Promise<void>((r) => server.close(() => r())),

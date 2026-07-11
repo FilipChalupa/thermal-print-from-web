@@ -54,6 +54,7 @@ Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `T
 | `THERMAL_DISCOVERY_HOSTS` | Ruční seznam IP pro sken (místo autodetekce podsítě) |
 | `WEBHOOK_URL` | Když je nastaveno, při selhání tisku se sem POSTne upozornění |
 | `PRINT_QUEUE_MAX_WAIT_MS`, `PRINT_QUEUE_RETRY_GAP_MS` | Okno opakování fronty pro offline tiskárnu |
+| `LOG_LEVEL` | Úroveň logování: `debug` / `info` (výchozí) / `warn` / `error` |
 
 Stav a diagnostika je na `GET /health` (běží IPP/mDNS, dostupnost a stav tiskárny, počty úloh, seznam ohlašovaných tiskáren).
 

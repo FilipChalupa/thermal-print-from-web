@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { log } from './log.js'
 
 /**
  * Persisted config. The core is a single list of network printers — each is
@@ -139,9 +140,13 @@ export function setConfig(patch: Partial<Config>): Config {
 	const next = { ...getConfig(), ...patch }
 	cache = next
 	try {
-		writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2))
+		// Atomic write: write a temp file then rename, so a crash mid-write can't
+		// leave a truncated / corrupt config.
+		const tmp = `${CONFIG_PATH}.tmp`
+		writeFileSync(tmp, JSON.stringify(next, null, 2))
+		renameSync(tmp, CONFIG_PATH)
 	} catch (err) {
-		console.error(`Nepodařilo se uložit konfiguraci do ${CONFIG_PATH}:`, err)
+		log.error(`Nepodařilo se uložit konfiguraci do ${CONFIG_PATH}:`, err)
 	}
 	return next
 }

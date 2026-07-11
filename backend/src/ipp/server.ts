@@ -5,6 +5,7 @@
  * the physical thermal printer as ESC/POS.
  */
 import { getConfig, paperWidthHmm } from '../config.js'
+import { log } from '../log.js'
 import type { AdvertisedPrinter } from '../config.js'
 import { logJob } from '../jobs-log.js'
 import { enqueuePrint } from '../print-queue.js'
@@ -244,7 +245,7 @@ async function processJob(job: Job): Promise<void> {
 	const ip = job.target.targetIp
 	if (!ip) {
 		job.state = 8 // aborted
-		console.error('IPP job přijat, ale tiskárna nemá nastavenou cílovou IP.')
+		log.error('IPP job přijat, ale tiskárna nemá nastavenou cílovou IP.')
 		logJob({ source: 'ipp', printerIp: '', name: job.name, status: 'error', error: 'Není nastavená cílová tiskárna' })
 		job.document = Buffer.alloc(0)
 		return

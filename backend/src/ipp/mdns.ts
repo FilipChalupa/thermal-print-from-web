@@ -6,6 +6,7 @@
  */
 import { Bonjour } from 'bonjour-service'
 import { getAdvertisedPrinters } from '../config.js'
+import { log } from '../log.js'
 import { MAKE_AND_MODEL, PDL_SUPPORTED, URF_SUPPORTED } from './server.js'
 
 export interface MdnsHandle {
@@ -49,8 +50,8 @@ export function startMdns(options: { port: number }): MdnsHandle {
 			txt,
 			subtypes: ['universal'],
 		})
-		service.on('error', (err) => console.error('mDNS advertising error:', err))
-		console.log(`mDNS: advertising "${printer.name}" (/${printer.resourcePath}) as _ipp._tcp on port ${options.port}`)
+		service.on('error', (err) => log.error('mDNS advertising error:', err))
+		log.info(`mDNS: advertising "${printer.name}" (/${printer.resourcePath}) as _ipp._tcp on port ${options.port}`)
 	}
 
 	return {
