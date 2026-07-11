@@ -447,7 +447,7 @@ export default function App() {
         </div>
       )}
       <main>
-        <h1>Tisk na Epson</h1>
+        <h1>Termální tisk</h1>
 
         <Printers
           printers={printers}
