@@ -33,15 +33,14 @@ Jak to funguje:
 
 - OS pošle stránku i jako **PDF** (`application/pdf`) — vyrenderuje se přes MuPDF.
 
-### Hvězdička a výběr tiskárny
+### Tiskárny a hvězdička
 
-V síti se vždy ohlašuje jedna **hlavní** tiskárna (jméno z `PRINTER_NAME`, výchozí „Thermal Printer"). Ta posílá tisk na IP označenou ve webu **hvězdičkou** ★ — to je „cíl systémového tisku". Pole *IP adresa tiskárny* automaticky **napovídá** nalezené tiskárny (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24; rozsah lze přebít přes `THERMAL_DISCOVERY_HOSTS`) a první nalezenou zvolí automaticky.
+Ve webu spravuješ **jeden seznam tiskáren** — každá je pojmenovaná, má svou IP a v síti se ohlašuje jako **samostatná AirPrint / IPP Everywhere tiskárna** (na cestě `ipp/print/<id>`). Tiskárny se **automaticky napovídají** z discovery (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24; rozsah lze přebít přes `THERMAL_DISCOVERY_HOSTS`) — stačí kliknout „přidat", nebo zadat IP ručně.
 
-- **Hvězdička** = kam míří hlavní síťová (AirPrint) tiskárna.
-- **Tlačítko *Tisknout*** (ruční tisk obrázku z webu) míří na tiskárnu právě vybranou v selectu.
-- Sekce **Další síťové tiskárny** přidává samostatné AirPrint fronty — každá má vlastní pevnou IP a je na hvězdičce nezávislá.
+- **Hvězdička ★ = výchozí tiskárna.** Ta dostane kanonickou cestu `ipp/print` a je cílem i webového tlačítka *Tisknout*. Při prvním spuštění se první nalezená přidá a označí jako výchozí automaticky (zero-config).
+- Ostatní tiskárny v seznamu fungují jako další AirPrint fronty, každá na svou fyzickou IP.
 
-Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `THERMAL_CONFIG_PATH`).
+Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `THERMAL_CONFIG_PATH`); starší formát (jedna `printerIp` + `virtualPrinters`) se při načtení automaticky převede na nový seznam.
 
 ### Proměnné prostředí
 
