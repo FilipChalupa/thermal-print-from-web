@@ -12,7 +12,6 @@ export default defineConfig({
       '/config': 'http://localhost:3000',
       '/discover': 'http://localhost:3000',
       '/printers': 'http://localhost:3000',
-      '/virtual-printers': 'http://localhost:3000',
       '/jobs': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
     },

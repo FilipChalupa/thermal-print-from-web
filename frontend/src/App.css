@@ -25,17 +25,6 @@ label {
   color: var(--text);
 }
 
-.system-target {
-  font-weight: 400;
-  color: var(--text);
-  font-size: 0.8rem;
-}
-
-.system-target strong {
-  color: var(--text-h);
-  font-weight: 600;
-}
-
 .reach-badge {
   margin-left: 6px;
   padding: 1px 7px;
@@ -58,283 +47,257 @@ label {
 .test-msg {
   font-size: 0.8rem;
   color: #0070f3;
-}
-
-/* --- Rich printer select --------------------------------------------------- */
-
-.printer-select {
-  position: relative;
-}
-
-.ps-trigger {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.ps-trigger-open {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
-  cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s;
 }
 
-.ps-trigger-open:hover {
-  border-color: #0070f3;
+/* --- Printers (unified list) ----------------------------------------------- */
+
+.printers {
+  text-align: left;
+  margin-bottom: 8px;
 }
 
-.ps-trigger-star {
-  flex: 0 0 auto;
-  width: 44px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.ps-trigger-star:hover {
-  border-color: #e6c200;
-  background: var(--bg);
-}
-
-.ps-trigger-star.is-starred {
-  background: rgba(230, 194, 0, 0.14);
-  border-color: #e6c200;
-}
-
-.ps-trigger-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.ps-trigger-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 1rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ps-trigger-ip {
-  font-size: 0.8rem;
-  font-weight: 400;
-  color: var(--text);
-}
-
-.ps-caret {
-  color: var(--text);
-  transition: transform 0.15s;
-}
-
-.ps-caret.open {
-  transform: rotate(180deg);
-}
-
-.ps-panel {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
-
-.ps-head {
+.printers-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text);
-  border-bottom: 1px solid var(--border);
 }
 
-.ps-refresh {
-  font-size: 0.78rem;
-  font-weight: 500;
-  padding: 3px 8px;
+.printers-head h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.printers-refresh {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: #0070f3;
   cursor: pointer;
+  padding: 3px 10px;
+  font-size: 0.8rem;
 }
 
-.ps-refresh:hover:not(:disabled) {
-  border-color: #0070f3;
-}
-
-.ps-refresh:disabled {
+.printers-refresh:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
-.ps-list {
+.printers-empty {
+  color: var(--text);
+  font-size: 0.85rem;
+  margin: 0 0 10px;
+}
+
+.printers-list {
   list-style: none;
-  margin: 0;
-  padding: 4px;
+  margin: 0 0 10px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
-  overflow-y: auto;
+  gap: 6px;
 }
 
-.ps-list li {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  border-radius: 6px;
-}
-
-.ps-list li.starred {
-  background: rgba(230, 194, 0, 0.12);
-}
-
-.ps-option {
-  flex: 1;
+.printers-list li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.ps-option:hover {
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--code-bg);
 }
 
-.ps-option-main {
+.printers-list li.is-default {
+  border-color: #e6c200;
+  background: rgba(230, 194, 0, 0.08);
+}
+
+.p-star {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: #d9b300;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.p-star.on {
+  color: #e6c200;
+}
+
+.p-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+}
+
+.p-dot.online {
+  background: #2ea043;
+}
+
+.p-dot.offline {
+  opacity: 0.6;
+}
+
+.p-main {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  min-width: 0;
+  text-align: left;
 }
 
-.ps-name {
-  font-size: 0.9rem;
+.p-name {
+  font-size: 0.92rem;
   font-weight: 500;
   color: var(--text-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.ps-ip {
+.p-badge {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #8a6d00;
+  background: rgba(230, 194, 0, 0.22);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.p-ip {
   font-size: 0.78rem;
   color: var(--text);
 }
 
-.ps-check {
-  color: #0070f3;
-  font-weight: 700;
+.p-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+  border: 1px solid #0070f3;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
 }
 
-.ps-icon-btn {
+.p-icon {
   flex: 0 0 auto;
-  width: 40px;
+  width: 34px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: none;
   background: transparent;
   border-radius: 6px;
+  color: var(--text);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
-.ps-icon-btn:hover {
-  background: var(--code-bg);
-}
-
-.ps-star {
-  color: #d9b300;
-  font-size: 1.2rem;
-  line-height: 1;
-}
-
-.ps-star.is-starred {
-  color: #e6c200;
-}
-
-.ps-test {
-  color: var(--text);
-}
-
-.ps-test:hover {
+.p-icon:hover {
+  background: var(--bg);
   color: #0070f3;
 }
 
-.ps-edit {
-  color: var(--text);
-}
-
-.ps-edit:hover {
-  color: #0070f3;
-}
-
-.ps-remove {
-  color: var(--text);
-  font-size: 1rem;
-}
-
-.ps-remove:hover {
+.p-remove:hover {
   color: #c00;
 }
 
-.ps-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #bbb;
+.printers-add {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
 }
 
-.ps-dot.online {
-  background: #2ea043;
+.printers-add > summary {
+  cursor: pointer;
+  padding: 9px 0;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
 }
 
-.ps-dot.offline {
-  background: #999;
-  opacity: 0.6;
+.printers-suggest {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.ps-unverified {
-  color: #c9a100;
+.printers-suggest button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.printers-suggest button:hover {
+  border-color: #0070f3;
+}
+
+.p-plus {
+  color: #0070f3;
   font-weight: 700;
+  font-size: 1rem;
 }
 
-.ps-rename-input {
+.printers-manual {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.printers-manual input {
   flex: 1;
-  min-width: 0;
+  min-width: 110px;
   padding: 8px 10px;
   font-size: 0.9rem;
-  border: 1px solid #0070f3;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
+  color: var(--text-h);
+}
+
+.printers-manual button {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: #0070f3;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.printers-manual button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.default-note {
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+
+.default-note strong {
   color: var(--text-h);
 }
 
@@ -495,159 +458,6 @@ label {
 
 .job-reprint:hover {
   border-color: #0070f3;
-}
-
-.vprinters {
-  margin-top: 20px;
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 12px;
-}
-
-.vprinters > summary {
-  cursor: pointer;
-  padding: 10px 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.vprinters-hint {
-  font-size: 0.78rem;
-  color: var(--text);
-  margin-bottom: 10px;
-}
-
-.vprinters-list {
-  list-style: none;
-  margin: 0 0 10px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.vprinters-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--code-bg);
-}
-
-.vprinters-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.vprinters-name {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-.vprinters-ip {
-  font-size: 0.78rem;
-  color: var(--text);
-}
-
-.vprinters-add {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.vprinters-add input {
-  flex: 1;
-  min-width: 120px;
-  padding: 8px 10px;
-  font-size: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
-}
-
-.vprinters-add button {
-  flex: 0 0 auto;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: #0070f3;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.vprinters-add button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ps-testall {
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 9px 12px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: transparent;
-  color: #0070f3;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.ps-testall:hover {
-  background: var(--code-bg);
-}
-
-.ps-empty {
-  padding: 12px;
-  text-align: center;
-  color: var(--text);
-  font-size: 0.85rem;
-}
-
-.ps-manual {
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.ps-manual input[type='text'] {
-  flex: 1;
-  padding: 8px 10px;
-  font-size: 0.9rem;
-}
-
-.ps-manual-apply {
-  flex: 0 0 auto;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: #0070f3;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.ps-manual-apply:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 input[type='text'],

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useMirrorLoading } from 'shared-loading-indicator'
-import { useStorageBackedState } from 'use-storage-backed-state'
-import PrinterSelect, { type DiscoveredPrinter, type UiPrinter } from './PrinterSelect'
+import Printers, { type DiscoveredPrinter, type NetworkPrinter } from './Printers'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
@@ -33,17 +32,6 @@ const DITHER_LABELS: Record<DitherAlgorithm, string> = {
   atkinson: 'Atkinson',
   ordered: 'Ordered (rastr)',
   threshold: 'Práh (bez ditheru)',
-}
-
-interface SavedPrinter {
-  ip: string
-  name: string
-}
-
-interface VirtualPrinter {
-  id: string
-  name: string
-  targetIp: string
 }
 
 interface TargetStatus {
@@ -90,29 +78,25 @@ async function applyRotation(file: File, degrees: number): Promise<Blob> {
 }
 
 export default function App() {
-  const [ip, setIp] = useStorageBackedState({ key: 'printer-ip', defaultValue: '' })
   const [copies, setCopies] = useState(1)
   const [items, setItems] = useState<ImageItem[]>([])
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [progress, setProgress] = useState<PrintProgress | null>(null)
+  const [printers, setPrinters] = useState<NetworkPrinter[]>([])
+  const [defaultPrinterId, setDefaultPrinterId] = useState('')
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([])
   const [discovering, setDiscovering] = useState(false)
-  const [saved, setSaved] = useState<SavedPrinter[]>([])
   const [paperWidthDots, setPaperWidthDots] = useState(576)
   const [ditherAlgorithm, setDitherAlgorithm] = useState<DitherAlgorithm>('floyd')
   const [brightness, setBrightness] = useState(0)
   const [contrast, setContrast] = useState(0)
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
-  // The IP that OS/system print jobs (via the virtual printer) are forwarded to.
-  const [starredIp, setStarredIp] = useState('')
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
-  // Live status of the system-print target (from /health).
+  // Live status of the default printer (from /health).
   const [target, setTarget] = useState<TargetStatus | null>(null)
-  const [virtualPrinters, setVirtualPrinters] = useState<VirtualPrinter[]>([])
 
-  // Feed print activity into the shared top-edge loading indicator.
   useMirrorLoading(status === 'loading' || testing)
   const [pageDragging, setPageDragging] = useState(false)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
@@ -120,13 +104,26 @@ export default function App() {
   const dragCounter = useRef(0)
   const isReordering = useRef(false)
   const reorderDragIndex = useRef<number | null>(null)
-
   const esRef = useRef<EventSource | null>(null)
+
+  const defaultPrinter = printers.find((p) => p.id === defaultPrinterId) ?? printers[0]
+  const defaultIp = defaultPrinter?.ip ?? ''
 
   function refreshJobs() {
     fetch(`${BACKEND_URL}/jobs`)
       .then((r) => (r.ok ? r.json() : { jobs: [] }))
       .then((d) => setJobs(Array.isArray(d.jobs) ? d.jobs : []))
+      .catch(() => {})
+  }
+
+  function loadPrinters() {
+    fetch(`${BACKEND_URL}/printers`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return
+        setPrinters(Array.isArray(d.printers) ? d.printers : [])
+        setDefaultPrinterId(typeof d.defaultPrinterId === 'string' ? d.defaultPrinterId : '')
+      })
       .catch(() => {})
   }
 
@@ -143,7 +140,7 @@ export default function App() {
       })
       .catch(() => {})
   }
-  // Poll the target printer's online/offline status.
+
   useEffect(() => {
     refreshHealth()
     const id = setInterval(refreshHealth, 15000)
@@ -151,7 +148,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Load config (starred printer, paper size), saved printers and recent jobs.
+  // Load print settings, printers and recent jobs on mount.
   useEffect(() => {
     fetch(`${BACKEND_URL}/config`)
       .then((r) => (r.ok ? r.json() : null))
@@ -161,71 +158,14 @@ export default function App() {
         if (cfg.ditherAlgorithm) setDitherAlgorithm(cfg.ditherAlgorithm)
         if (typeof cfg.brightness === 'number') setBrightness(cfg.brightness)
         if (typeof cfg.contrast === 'number') setContrast(cfg.contrast)
-        if (cfg.printerIp) {
-          setStarredIp(cfg.printerIp)
-          if (!ip) setIp(cfg.printerIp)
-        }
       })
       .catch(() => {})
-    fetch(`${BACKEND_URL}/printers`)
-      .then((r) => (r.ok ? r.json() : { printers: [] }))
-      .then((d) => setSaved(Array.isArray(d.printers) ? d.printers : []))
-      .catch(() => {})
-    loadVirtualPrinters()
+    loadPrinters()
     refreshJobs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Star an IP as the destination for system print jobs (Cmd/Ctrl+P via the
-  // virtual printer). Persisted server-side because IPP jobs carry no IP.
-  function starIp(target: string) {
-    const value = target.trim()
-    if (!value) return
-    setStarredIp(value)
-    setIp(value)
-    setTarget(null)
-    fetch(`${BACKEND_URL}/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ printerIp: value }),
-    })
-      .then(() => setTimeout(refreshHealth, 1200)) // let the backend re-probe the new target
-      .catch(() => {})
-  }
-
-  // Reprint a previous job from the server-retained payload.
-  function reprintJob(id: number) {
-    fetch(`${BACKEND_URL}/jobs/${id}/reprint`, { method: 'POST' })
-      .then(() => setTimeout(refreshJobs, 300))
-      .catch(() => {})
-  }
-
-  // Extra driverless queues (each mapped to another physical printer).
-  function loadVirtualPrinters() {
-    fetch(`${BACKEND_URL}/virtual-printers`)
-      .then((r) => (r.ok ? r.json() : { virtualPrinters: [] }))
-      .then((d) => setVirtualPrinters(Array.isArray(d.virtualPrinters) ? d.virtualPrinters : []))
-      .catch(() => {})
-  }
-  function addVirtualPrinter(name: string, targetIp: string) {
-    fetch(`${BACKEND_URL}/virtual-printers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, targetIp }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.virtualPrinters && setVirtualPrinters(d.virtualPrinters))
-      .catch(() => {})
-  }
-  function removeVirtualPrinter(id: string) {
-    fetch(`${BACKEND_URL}/virtual-printers/${id}`, { method: 'DELETE' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.virtualPrinters && setVirtualPrinters(d.virtualPrinters))
-      .catch(() => {})
-  }
-
-  // Live discovery over SSE: printers appear as they are found (mDNS instantly,
-  // port scan trickles in) rather than blocking on the whole sweep.
+  // Live discovery over SSE: printers appear as they are found.
   function discoverPrinters() {
     esRef.current?.close()
     setDiscovered([])
@@ -236,12 +176,7 @@ export default function App() {
       const p = JSON.parse((e as MessageEvent).data) as DiscoveredPrinter
       setDiscovered((prev) => {
         const existing = prev.find((x) => x.ip === p.ip)
-        const merged: DiscoveredPrinter = {
-          ...existing,
-          ...p,
-          name: p.name ?? existing?.name,
-          verified: p.verified || existing?.verified,
-        }
+        const merged: DiscoveredPrinter = { ...existing, ...p, name: p.name ?? existing?.name, verified: p.verified || existing?.verified }
         return [...prev.filter((x) => x.ip !== p.ip), merged]
       })
     })
@@ -249,6 +184,7 @@ export default function App() {
       setDiscovering(false)
       es.close()
       if (esRef.current === es) esRef.current = null
+      loadPrinters() // pick up any printer the backend auto-added on boot
     }
     es.addEventListener('done', stop)
     es.onerror = stop
@@ -259,36 +195,61 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-star the first discovered printer (preferring mDNS ones) as the system
-  // print target when nothing is starred yet. Never overrides a manual choice.
-  useEffect(() => {
-    if (starredIp || discovered.length === 0) return
-    const pick = discovered.find((p) => p.source === 'mdns') ?? discovered[0]
-    if (pick) starIp(pick.ip)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discovered, starredIp])
-
-  // Rename (and thereby save) a printer, or remove a saved one.
-  function renamePrinter(target: string, name: string) {
+  // --- Printer management (unified list; each is its own AirPrint queue) ---
+  function applyPrinters(d: { printers?: NetworkPrinter[]; defaultPrinterId?: string } | null) {
+    if (!d) return
+    if (Array.isArray(d.printers)) setPrinters(d.printers)
+    if (typeof d.defaultPrinterId === 'string') setDefaultPrinterId(d.defaultPrinterId)
+  }
+  function addPrinter(name: string, ip: string) {
     fetch(`${BACKEND_URL}/printers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, ip }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        applyPrinters(d)
+        setTimeout(refreshHealth, 1200)
+      })
+      .catch(() => {})
+  }
+  function renamePrinter(id: string, name: string) {
+    fetch(`${BACKEND_URL}/printers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: target, name }),
+      body: JSON.stringify({ name }),
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.printers && setSaved(d.printers))
+      .then(applyPrinters)
       .catch(() => {})
   }
-  function removeSavedPrinter(target: string) {
-    fetch(`${BACKEND_URL}/printers`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: target }),
-    })
+  function removePrinter(id: string) {
+    fetch(`${BACKEND_URL}/printers/${id}`, { method: 'DELETE' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d?.printers && setSaved(d.printers))
+      .then((d) => {
+        applyPrinters(d)
+        setTimeout(refreshHealth, 1200)
+      })
       .catch(() => {})
   }
+  function setDefault(id: string) {
+    setTarget(null)
+    fetch(`${BACKEND_URL}/printers/${id}/default`, { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        applyPrinters(d)
+        setTimeout(refreshHealth, 1200)
+      })
+      .catch(() => {})
+  }
+
+  function reprintJob(id: number) {
+    fetch(`${BACKEND_URL}/jobs/${id}/reprint`, { method: 'POST' })
+      .then(() => setTimeout(refreshJobs, 300))
+      .catch(() => {})
+  }
+
   function changePaperWidth(dots: number) {
     setPaperWidthDots(dots)
     fetch(`${BACKEND_URL}/config`, {
@@ -311,32 +272,8 @@ export default function App() {
     }, 300)
   }
 
-  // Merge saved + live-discovered + the current/starred IP into one list.
-  const mergedPrinters: UiPrinter[] = (() => {
-    const byIp = new Map<string, UiPrinter>()
-    for (const s of saved) byIp.set(s.ip, { ip: s.ip, name: s.name, source: 'saved', online: false, saved: true })
-    for (const d of discovered) {
-      const ex = byIp.get(d.ip)
-      byIp.set(d.ip, {
-        ip: d.ip,
-        name: ex?.name ?? d.name,
-        source: ex?.saved ? 'saved' : d.source,
-        verified: d.verified,
-        online: true,
-        saved: ex?.saved ?? false,
-      })
-    }
-    for (const extra of [starredIp, ip]) {
-      if (extra && IPV4.test(extra) && !byIp.has(extra)) {
-        byIp.set(extra, { ip: extra, source: 'manual', online: false, saved: false })
-      }
-    }
-    return [...byIp.values()].sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }))
-  })()
-
-  // Print a text test receipt (name + IP) so the user can confirm which physical
-  // device an IP belongs to.
-  async function printTest(ip: string, name?: string) {
+  // Print a text test receipt so the user can confirm which device an IP is.
+  async function printTest(ip: string, name: string) {
     setTesting(true)
     setTestMsg(`Posílám testovací lístek na ${ip}…`)
     try {
@@ -355,30 +292,10 @@ export default function App() {
     }
   }
 
-  async function printTestAll() {
-    setTesting(true)
-    setTestMsg('Posílám testovací lístek na všechny nalezené tiskárny…')
-    try {
-      const res = await fetch(`${BACKEND_URL}/print-test-all`, { method: 'POST' })
-      const d = await res.json().catch(() => ({}))
-      const results: { ok: boolean }[] = Array.isArray(d.results) ? d.results : []
-      const ok = results.filter((r) => r.ok).length
-      setTestMsg(`Testovací lístek odeslán na ${ok} z ${results.length} ${results.length === 1 ? 'tiskárny' : 'tiskáren'}`)
-    } catch {
-      setTestMsg('Nepodařilo se odeslat testy')
-    } finally {
-      setTesting(false)
-      refreshJobs()
-    }
-  }
-
   function addFiles(files: FileList | File[]) {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'))
     if (imageFiles.length === 0) return
-    setItems((prev) => [
-      ...prev,
-      ...imageFiles.map((file) => ({ file, preview: URL.createObjectURL(file), rotation: 0 })),
-    ])
+    setItems((prev) => [...prev, ...imageFiles.map((file) => ({ file, preview: URL.createObjectURL(file), rotation: 0 }))])
   }
 
   function removeImage(index: number) {
@@ -386,9 +303,7 @@ export default function App() {
   }
 
   function rotateImage(index: number) {
-    setItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, rotation: (item.rotation + 90) % 360 } : item))
-    )
+    setItems((prev) => prev.map((item, i) => (i === index ? { ...item, rotation: (item.rotation + 90) % 360 } : item)))
   }
 
   // Page-level file drag & drop
@@ -441,14 +356,12 @@ export default function App() {
     reorderDragIndex.current = index
     e.dataTransfer.effectAllowed = 'move'
   }
-
   function onItemDragOver(e: React.DragEvent, index: number) {
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
     setDragOverIndex(index)
   }
-
   function onItemDrop(e: React.DragEvent, toIndex: number) {
     e.preventDefault()
     e.stopPropagation()
@@ -463,7 +376,6 @@ export default function App() {
     }
     setDragOverIndex(null)
   }
-
   function onItemDragEnd() {
     isReordering.current = false
     reorderDragIndex.current = null
@@ -474,14 +386,14 @@ export default function App() {
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (!IPV4.test(ip) || items.length === 0) return
+    if (!IPV4.test(defaultIp) || items.length === 0) return
 
     setStatus('loading')
     setErrorMsg('')
     setProgress(null)
 
     const formData = new FormData()
-    formData.append('ip', ip)
+    formData.append('ip', defaultIp)
     formData.append('copies', String(copies))
     for (const item of items) {
       const blob = await applyRotation(item.file, item.rotation)
@@ -490,7 +402,6 @@ export default function App() {
 
     try {
       const res = await fetch(`${BACKEND_URL}/print`, { method: 'POST', body: formData })
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error((data as { error?: string }).error ?? 'Print failed')
@@ -526,55 +437,40 @@ export default function App() {
     }
   }
 
-  // Prefer a friendly (saved/discovered) name for the starred printer.
-  const starredMatch = mergedPrinters.find((p) => p.ip === starredIp)
-  const starredLabel = starredMatch?.name ? `${starredMatch.name} (${starredIp})` : starredIp
+  const badge = targetBadge(target)
 
   return (
     <>
       {pageDragging && (
-        <div
-          className="drag-overlay"
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => e.preventDefault()}
-        >
+        <div className="drag-overlay" onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
           <p>Pustit pro přidání obrázků</p>
         </div>
       )}
       <main>
         <h1>Tisk na Epson</h1>
-        <form onSubmit={handleSubmit}>
-          <label>
-            IP adresa tiskárny
-            <PrinterSelect
-              value={ip}
-              onChange={setIp}
-              printers={mergedPrinters}
-              discovering={discovering}
-              onRefresh={discoverPrinters}
-              starredIp={starredIp}
-              onStar={starIp}
-              onTest={printTest}
-              onTestAll={printTestAll}
-              onRename={renamePrinter}
-              onRemove={removeSavedPrinter}
-            />
-            <small className="system-target">
-              {starredIp ? (
-                <>
-                  Systémový tisk (Cmd/Ctrl+P) míří na <strong>★ {starredLabel}</strong>
-                  {(() => {
-                    const badge = targetBadge(target)
-                    return badge ? <span className={`reach-badge ${badge.cls}`}>{badge.label}</span> : null
-                  })()}
-                </>
-              ) : (
-                <>Označ tiskárnu hvězdičkou — na ni pak míří tisk přes systém (Cmd/Ctrl+P).</>
-              )}
-            </small>
-            {testMsg && <small className="test-msg">{testMsg}</small>}
-          </label>
 
+        <Printers
+          printers={printers}
+          defaultPrinterId={defaultPrinterId}
+          discovered={discovered}
+          discovering={discovering}
+          onRefresh={discoverPrinters}
+          targetReachable={target?.reachable ?? null}
+          onSetDefault={setDefault}
+          onRename={renamePrinter}
+          onRemove={removePrinter}
+          onTest={printTest}
+          onAdd={addPrinter}
+        />
+        {defaultPrinter && (
+          <p className="default-note">
+            Výchozí tiskárna (systémový i web tisk): <strong>★ {defaultPrinter.name}</strong>
+            {badge && <span className={`reach-badge ${badge.cls}`}>{badge.label}</span>}
+          </p>
+        )}
+        {testMsg && <p className="test-msg">{testMsg}</p>}
+
+        <form onSubmit={handleSubmit}>
           <label className="paper-size">
             Šířka papíru
             <select value={paperWidthDots} onChange={(e) => changePaperWidth(Number(e.target.value))}>
@@ -606,48 +502,20 @@ export default function App() {
               <span>
                 Jas <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
               </span>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                value={brightness}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  setBrightness(v)
-                  postSettings({ brightness: v })
-                }}
-              />
+              <input type="range" min={-100} max={100} value={brightness} onChange={(e) => { const v = Number(e.target.value); setBrightness(v); postSettings({ brightness: v }) }} />
             </label>
             <label className="slider">
               <span>
                 Kontrast <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
               </span>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                value={contrast}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  setContrast(v)
-                  postSettings({ contrast: v })
-                }}
-              />
+              <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
             </label>
           </details>
 
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => e.target.files && addFiles(e.target.files)}
-              style={{ display: 'none' }}
-            />
+            <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => e.target.files && addFiles(e.target.files)} style={{ display: 'none' }} />
             <p>
-              Přetáhněte obrázky kamkoliv, vložte z clipboardu nebo{' '}
-              <span className="link">vyberte ze souborů</span>
+              Přetáhněte obrázky kamkoliv, vložte z clipboardu nebo <span className="link">vyberte ze souborů</span>
             </p>
           </div>
 
@@ -665,11 +533,7 @@ export default function App() {
                     onDragEnd={onItemDragEnd}
                   >
                     <div className="preview-img-wrap">
-                      <img
-                        src={item.preview}
-                        alt={item.file.name}
-                        style={{ transform: `rotate(${item.rotation}deg)` }}
-                      />
+                      <img src={item.preview} alt={item.file.name} style={{ transform: `rotate(${item.rotation}deg)` }} />
                     </div>
                     <div className="preview-actions">
                       <button type="button" className="action-btn" onClick={() => rotateImage(i)} title="Otočit">
@@ -693,16 +557,10 @@ export default function App() {
 
           <label>
             Počet výtisků
-            <input
-              type="number"
-              value={copies}
-              min={1}
-              max={99}
-              onChange={(e) => setCopies(Number(e.target.value))}
-            />
+            <input type="number" value={copies} min={1} max={99} onChange={(e) => setCopies(Number(e.target.value))} />
           </label>
 
-          <button type="submit" disabled={status === 'loading' || items.length === 0 || !IPV4.test(ip)}>
+          <button type="submit" disabled={status === 'loading' || items.length === 0 || !IPV4.test(defaultIp)}>
             {status === 'loading'
               ? progress
                 ? `Tisknu ${progress.current}/${progress.total}…`
@@ -739,13 +597,7 @@ export default function App() {
                   </span>
                   <span className="job-time">{formatTime(j.at)}</span>
                   {j.status === 'ok' && (
-                    <button
-                      type="button"
-                      className="job-reprint"
-                      onClick={() => reprintJob(j.id)}
-                      title="Vytisknout znovu"
-                      aria-label="Vytisknout znovu"
-                    >
+                    <button type="button" className="job-reprint" onClick={() => reprintJob(j.id)} title="Vytisknout znovu" aria-label="Vytisknout znovu">
                       ↻
                     </button>
                   )}
@@ -754,8 +606,6 @@ export default function App() {
             </ul>
           </section>
         )}
-
-        <VirtualPrinters printers={virtualPrinters} onAdd={addVirtualPrinter} onRemove={removeVirtualPrinter} />
       </main>
     </>
   )
@@ -763,67 +613,6 @@ export default function App() {
 
 function jobSourceLabel(source: JobLogEntry['source']): string {
   return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : source === 'reprint' ? 'Přetisk' : 'Test'
-}
-
-const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/
-
-function VirtualPrinters({
-  printers,
-  onAdd,
-  onRemove,
-}: {
-  printers: VirtualPrinter[]
-  onAdd: (name: string, targetIp: string) => void
-  onRemove: (id: string) => void
-}) {
-  const [name, setName] = useState('')
-  const [targetIp, setTargetIp] = useState('')
-  const canAdd = name.trim().length > 0 && IPV4_RE.test(targetIp.trim())
-
-  return (
-    <details className="vprinters">
-      <summary>Další síťové tiskárny {printers.length > 0 ? `(${printers.length})` : ''}</summary>
-      <p className="vprinters-hint">
-        Každá se v síti objeví jako samostatná systémová tiskárna mířící na zadanou IP. (Nová se ohlásí do sítě do pár sekund.)
-      </p>
-      {printers.length > 0 && (
-        <ul className="vprinters-list">
-          {printers.map((p) => (
-            <li key={p.id}>
-              <span className="vprinters-main">
-                <span className="vprinters-name">{p.name}</span>
-                <span className="vprinters-ip">{p.targetIp}</span>
-              </span>
-              <button type="button" className="ps-icon-btn ps-remove" onClick={() => onRemove(p.id)} title="Odebrat" aria-label={`Odebrat ${p.name}`}>
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="vprinters-add">
-        <input type="text" placeholder="Název (např. Kuchyně)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input
-          type="text"
-          inputMode="numeric"
-          placeholder="IP, např. 192.168.1.50"
-          value={targetIp}
-          onChange={(e) => setTargetIp(e.target.value)}
-        />
-        <button
-          type="button"
-          disabled={!canAdd}
-          onClick={() => {
-            onAdd(name.trim(), targetIp.trim())
-            setName('')
-            setTargetIp('')
-          }}
-        >
-          Přidat
-        </button>
-      </div>
-    </details>
-  )
 }
 
 function formatTime(at: number): string {
