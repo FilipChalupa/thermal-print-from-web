@@ -19,7 +19,7 @@ import {
   updatePrinter,
 } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
-import { getJobEntry, getJobLog, getJobPayload } from './jobs-log.js'
+import { flushJobs, getJobEntry, getJobLog, getJobPayload, hasPayload, loadJobs } from './jobs-log.js'
 import { log } from './log.js'
 import { enqueuePrint } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
@@ -86,6 +86,7 @@ let shuttingDown = false
 async function shutdown(): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
+  flushJobs()
   for (const t of runtime.timers) clearInterval(t)
   runtime.timers = []
   try {
@@ -240,8 +241,9 @@ app.get('/discover/stream', (c) =>
   }),
 )
 
-// Recent print jobs across all channels (IPP / web / test).
-app.get('/jobs', (c) => c.json({ jobs: getJobLog() }))
+// Recent print jobs across all channels (IPP / web / test). `reprintable` is
+// false for jobs whose payload is no longer retained (e.g. loaded after restart).
+app.get('/jobs', (c) => c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id) })) }))
 
 // Re-print a previous job from its retained payload.
 app.post('/jobs/:id/reprint', async (c) => {
@@ -355,6 +357,9 @@ export function startServer(
     }, async (info) => {
       runtime.webServer = webServer as unknown as Runtime['webServer']
       log.info(`Server is running on http://localhost:${info.port}`)
+
+      // Restore persisted job history + enable ongoing persistence.
+      loadJobs()
 
       // Warm discovery + auto-select a target in the background (non-blocking).
       void autoConfigurePrinter()

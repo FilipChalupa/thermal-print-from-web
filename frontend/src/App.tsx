@@ -59,6 +59,7 @@ interface JobLogEntry {
   pages?: number
   status: 'ok' | 'error'
   error?: string
+  reprintable?: boolean
 }
 
 async function applyRotation(file: File, degrees: number): Promise<Blob> {
@@ -605,7 +606,7 @@ export default function App() {
                     </span>
                   </span>
                   <span className="job-time">{relativeTime(j.at)}</span>
-                  {j.status === 'ok' && (
+                  {j.status === 'ok' && j.reprintable && (
                     <button type="button" className="job-reprint" onClick={() => reprintJob(j.id)} title="Vytisknout znovu" aria-label="Vytisknout znovu">
                       ↻
                     </button>

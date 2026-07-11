@@ -51,6 +51,7 @@ Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `T
 | `PRINTER_IP`, `PRINTER_NAME` | Výchozí cílová IP a jméno hlavní tiskárny v síti |
 | `PAPER_WIDTH_DOTS` | Výchozí šířka tisku: `576` (80 mm) nebo `384` (58 mm) |
 | `THERMAL_CONFIG_PATH` | Cesta ke konfiguračnímu souboru |
+| `THERMAL_JOBS_PATH` | Cesta k souboru s historií úloh (výchozí vedle configu) |
 | `THERMAL_DISCOVERY_HOSTS` | Ruční seznam IP pro sken (místo autodetekce podsítě) |
 | `WEBHOOK_URL` | Když je nastaveno, při selhání tisku se sem POSTne upozornění |
 | `PRINT_QUEUE_MAX_WAIT_MS`, `PRINT_QUEUE_RETRY_GAP_MS` | Okno opakování fronty pro offline tiskárnu |
