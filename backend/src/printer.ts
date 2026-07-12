@@ -160,16 +160,27 @@ function rasterPageToEscPos(page: RasterPage): Buffer[] {
   return drawableToEscPos(canvas, page.width, page.height)
 }
 
-const PRINTER_PORT = 9100
+const DEFAULT_PORT = 9100
 const INIT = Buffer.from([0x1b, 0x40]) // Initialize printer
 const CENTER_ALIGN = Buffer.from([0x1b, 0x61, 1]) // Center alignment
 const FEED = Buffer.from([0x1b, 0x64, 6]) // Feed 6 lines before cut
-const CUT = Buffer.from([0x1b, 0x69]) // Full cut
+
+/** Cut command per the configured cut mode (empty buffer = no cut). */
+function cutBytes(): Buffer {
+  switch (getConfig().cutMode) {
+    case 'none':
+      return Buffer.alloc(0)
+    case 'partial':
+      return Buffer.from([0x1b, 0x6d]) // ESC m — partial cut
+    default:
+      return Buffer.from([0x1b, 0x69]) // ESC i — full cut
+  }
+}
 
 /** Open a raw-print connection and write a fully-assembled ESC/POS payload. */
-export function sendEscPos(host: string, payload: Buffer): Promise<void> {
+export function sendEscPos(host: string, payload: Buffer, port = DEFAULT_PORT): Promise<void> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host, port: PRINTER_PORT }, () => {
+    const socket = net.createConnection({ host, port }, () => {
       socket.write(payload)
       setTimeout(() => {
         socket.end()
@@ -184,10 +195,16 @@ export function sendEscPos(host: string, payload: Buffer): Promise<void> {
   })
 }
 
+/** Pulse the cash drawer connected to the printer (ESC p 0 25ms 250ms). */
+export function openCashDrawer(host: string, port = DEFAULT_PORT): Promise<void> {
+  return sendEscPos(host, Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa]), port)
+}
+
 /** Wrap already-rendered ESC/POS raster chunks with init/cut, `copies` times. */
 function assembleCopies(chunks: Buffer[], copies: number): Buffer {
+  const cut = cutBytes()
   const parts: Buffer[] = [INIT, CENTER_ALIGN]
-  for (let i = 0; i < copies; i++) parts.push(...chunks, FEED, CUT)
+  for (let i = 0; i < copies; i++) parts.push(...chunks, FEED, cut)
   return Buffer.concat(parts)
 }
 
@@ -198,8 +215,9 @@ async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<B
 
 /** Build a payload from several images back-to-back (each cut), shared init. */
 export async function buildImagesPayload(imageBuffers: Buffer[], copies: number): Promise<Buffer> {
+  const cut = cutBytes()
   const chunks: Buffer[] = []
-  for (const buf of imageBuffers) chunks.push(...(await imageToEscPos(buf)), FEED, CUT)
+  for (const buf of imageBuffers) chunks.push(...(await imageToEscPos(buf)), FEED, cut)
   // Re-use assembleCopies for the shared INIT/CENTER, but the per-image feed/cut
   // are already included, so pass the chunks as a single "copy" and repeat that.
   const parts: Buffer[] = [INIT, CENTER_ALIGN]
@@ -244,7 +262,7 @@ export function buildTestPayload(name: string, ip: string, at = new Date()): Buf
     cp852(at.toLocaleString('cs-CZ')),
     NL,
     FEED,
-    CUT,
+    cutBytes(),
   ])
 }
 

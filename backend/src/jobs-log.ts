@@ -105,8 +105,8 @@ export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer):
 	const id = nextId++
 	entries.unshift({ ...entry, id, at: Date.now() })
 
-	// Retain the payload for reprint, within per-job and total memory budgets.
-	if (payload && entry.status === 'ok' && payload.length <= MAX_PAYLOAD_BYTES) {
+	// Retain the payload (for reprint / retry, incl. failed jobs), within budgets.
+	if (payload && payload.length <= MAX_PAYLOAD_BYTES) {
 		payloads.set(id, payload)
 		payloadTotal += payload.length
 		while (payloadTotal > MAX_PAYLOAD_TOTAL_BYTES && payloads.size > 1) {

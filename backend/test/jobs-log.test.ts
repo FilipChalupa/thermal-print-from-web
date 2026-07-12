@@ -12,9 +12,9 @@ describe('jobs log payload retention', () => {
 		expect(getJobPayload(id)?.toString()).toBe('RECEIPT')
 	})
 
-	it('does not retain payloads of failed jobs', () => {
+	it('retains payloads of failed jobs too (so they can be retried)', () => {
 		const id = logJob({ source: 'web', printerIp: '1.2.3.4', name: 'failed', status: 'error' }, Buffer.from('X'))
-		expect(getJobPayload(id)).toBeUndefined()
+		expect(getJobPayload(id)?.toString()).toBe('X')
 	})
 
 	it('drops a single oversized payload (> per-job cap)', () => {

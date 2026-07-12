@@ -25,10 +25,10 @@ export interface PrinterStatus {
 let status: PrinterStatus = { ip: '', reachable: null, online: false, paperOut: false, coverOpen: false, lastCheck: 0 }
 
 /** Lightweight connect-only reachability check (used by the print queue). */
-export function tcpReachable(ip: string, timeoutMs = 800): Promise<boolean> {
+export function tcpReachable(ip: string, port = PRINT_PORT, timeoutMs = 800): Promise<boolean> {
 	return new Promise((resolve) => {
 		if (!ip) return resolve(false)
-		const socket = createConnection({ host: ip, port: PRINT_PORT })
+		const socket = createConnection({ host: ip, port })
 		let settled = false
 		const finish = (ok: boolean) => {
 			if (settled) return
@@ -44,11 +44,11 @@ export function tcpReachable(ip: string, timeoutMs = 800): Promise<boolean> {
 }
 
 /** Connect and read ESC/POS real-time status (paper / cover / online). */
-function probeStatus(ip: string): Promise<Omit<PrinterStatus, 'ip' | 'lastCheck'>> {
+function probeStatus(ip: string, port = PRINT_PORT): Promise<Omit<PrinterStatus, 'ip' | 'lastCheck'>> {
 	return new Promise((resolve) => {
 		const offline = { reachable: false, online: false, paperOut: false, coverOpen: false }
 		if (!ip) return resolve(offline)
-		const socket = createConnection({ host: ip, port: PRINT_PORT })
+		const socket = createConnection({ host: ip, port })
 		let settled = false
 		const bytes: number[] = []
 		let readTimer: ReturnType<typeof setTimeout> | undefined
@@ -87,8 +87,9 @@ function probeStatus(ip: string): Promise<Omit<PrinterStatus, 'ip' | 'lastCheck'
 }
 
 export async function refreshPrinterStatus(): Promise<PrinterStatus> {
-	const ip = getDefaultPrinter()?.ip ?? ''
-	const s = await probeStatus(ip)
+	const def = getDefaultPrinter()
+	const ip = def?.ip ?? ''
+	const s = await probeStatus(ip, def?.port ?? PRINT_PORT)
 	// Ignore a stale result if the default printer changed while we were probing.
 	if ((getDefaultPrinter()?.ip ?? '') !== ip) return status
 	status = { ip, ...s, lastCheck: Date.now() }

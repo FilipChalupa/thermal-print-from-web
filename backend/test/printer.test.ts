@@ -101,6 +101,41 @@ describe('printImage / printRasterPages', () => {
 	})
 })
 
+describe('cut mode + cash drawer', () => {
+	const FULL = Buffer.from([0x1b, 0x69])
+	const PARTIAL = Buffer.from([0x1b, 0x6d])
+
+	it('emits the cut command for the configured mode', () => {
+		config.setConfig({ cutMode: 'full' })
+		let p = printer.buildTestPayload('N', '1.2.3.4')
+		expect(p.includes(FULL)).toBe(true)
+
+		config.setConfig({ cutMode: 'partial' })
+		p = printer.buildTestPayload('N', '1.2.3.4')
+		expect(p.includes(PARTIAL)).toBe(true)
+		expect(p.includes(FULL)).toBe(false)
+
+		config.setConfig({ cutMode: 'none' })
+		p = printer.buildTestPayload('N', '1.2.3.4')
+		expect(p.includes(FULL)).toBe(false)
+		expect(p.includes(PARTIAL)).toBe(false)
+
+		config.setConfig({ cutMode: 'full' }) // restore
+	})
+
+	it('sends the cash-drawer pulse to the printer port', async () => {
+		const chunks: Buffer[] = []
+		const server = net.createServer((s) => s.on('data', (d) => chunks.push(d)))
+		await new Promise<void>((r) => server.listen(9100, '127.0.0.1', r))
+		try {
+			await printer.openCashDrawer('127.0.0.1')
+		} finally {
+			server.close()
+		}
+		expect(Buffer.concat(chunks).equals(Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa]))).toBe(true)
+	})
+})
+
 afterAll(() => {
 	/* config temp file left in tmpdir */
 })

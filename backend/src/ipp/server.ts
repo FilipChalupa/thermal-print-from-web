@@ -263,6 +263,7 @@ async function processJob(job: Job): Promise<void> {
 			pages: pages.length,
 			copies: job.copies,
 			format: isPdf ? 'pdf' : 'raster',
+			port: job.target.targetPort,
 		})
 		job.state = 9 // completed
 	} catch {

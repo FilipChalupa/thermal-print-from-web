@@ -27,6 +27,18 @@ describe('print queue', () => {
 		}
 	})
 
+	it('sends to the printer on its configured port', async () => {
+		const chunks: Buffer[] = []
+		const server = net.createServer((s) => s.on('data', (d) => chunks.push(d)))
+		await new Promise<void>((r) => server.listen(9110, IP, r))
+		try {
+			await enqueuePrint(IP, Buffer.from('PORTED'), { source: 'web', name: 'p', port: 9110 })
+			expect(Buffer.concat(chunks).toString()).toBe('PORTED')
+		} finally {
+			server.close()
+		}
+	})
+
 	it('rejects and logs when the printer never comes online', async () => {
 		await expect(enqueuePrint('192.0.2.1', Buffer.from('X'), { source: 'test', name: 'unreachable' })).rejects.toThrow()
 		expect(getJobLog().some((j) => j.name === 'unreachable' && j.status === 'error')).toBe(true)

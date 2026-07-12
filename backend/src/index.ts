@@ -8,6 +8,8 @@ import { dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import {
   addPrinter,
+  CUT_MODES,
+  DEFAULT_PORT,
   DITHER_ALGORITHMS,
   getAdvertisedPrinters,
   getConfig,
@@ -20,13 +22,14 @@ import {
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { flushJobs, getJobEntry, getJobLog, getJobPayload, hasPayload, loadJobs } from './jobs-log.js'
 import { log } from './log.js'
-import { enqueuePrint } from './print-queue.js'
+import { enqueuePrint, getQueueJobs } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
 import type { IppHttpHandle } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import type { MdnsHandle } from './ipp/mdns.js'
-import { buildImagesPayload, buildTestPayload } from './printer.js'
+import { buildImagesPayload, buildTestPayload, openCashDrawer } from './printer.js'
+import type { Context, Next } from 'hono'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const publicDir = join(__dirname, '..', 'public')
@@ -107,12 +110,35 @@ const app = new Hono()
 
 app.use('/*', cors())
 
-app.post('/print', async (c) => {
+// Simple in-memory rate limit for print-triggering endpoints (0 = disabled),
+// so the public web UI can't be abused to waste paper.
+const RATE_LIMIT_PER_MIN = process.env.RATE_LIMIT_PER_MIN === undefined ? 60 : Number(process.env.RATE_LIMIT_PER_MIN)
+const rateHits = new Map<string, number[]>()
+async function rateLimit(c: Context, next: Next) {
+  if (!RATE_LIMIT_PER_MIN) return next()
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0].trim() || c.req.header('x-real-ip') || 'local'
+  const now = Date.now()
+  const recent = (rateHits.get(ip) ?? []).filter((t) => now - t < 60_000)
+  if (recent.length >= RATE_LIMIT_PER_MIN) {
+    return c.json({ error: 'Příliš mnoho tiskových požadavků, zkus to za chvíli.' }, 429)
+  }
+  recent.push(now)
+  rateHits.set(ip, recent)
+  await next()
+}
+
+const parsePort = (v: unknown): number => {
+  const n = Number(v)
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : DEFAULT_PORT
+}
+
+app.post('/print', rateLimit, async (c) => {
   const formData = await c.req.formData()
 
   const ip = formData.get('ip')
   const imageFiles = formData.getAll('images')
   const copiesRaw = formData.get('copies')
+  const port = parsePort(formData.get('port'))
 
   if (!ip || typeof ip !== 'string') {
     return c.json({ error: 'IP address is required' }, 400)
@@ -133,7 +159,7 @@ app.post('/print', async (c) => {
       const payload = await buildImagesPayload(buffers, copies)
       // The queue serializes with other jobs, retries if the printer is briefly
       // offline, and logs the job (with payload for reprint).
-      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image' })
+      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image', port })
       await s.write(JSON.stringify({ type: 'done' }) + '\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Chyba při tisku'
@@ -150,6 +176,7 @@ function publicConfig() {
     ditherAlgorithm: cfg.ditherAlgorithm,
     brightness: cfg.brightness,
     contrast: cfg.contrast,
+    cutMode: cfg.cutMode,
   }
 }
 
@@ -164,6 +191,7 @@ app.post('/config', async (c) => {
   if (DITHER_ALGORITHMS.includes(body.ditherAlgorithm)) patch.ditherAlgorithm = body.ditherAlgorithm
   if (typeof body.brightness === 'number') patch.brightness = clamp(body.brightness, -100, 100)
   if (typeof body.contrast === 'number') patch.contrast = clamp(body.contrast, -100, 100)
+  if (CUT_MODES.includes(body.cutMode)) patch.cutMode = body.cutMode
   setConfig(patch)
   return c.json(publicConfig())
 })
@@ -182,16 +210,17 @@ app.post('/printers', async (c) => {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
   if (!name || !ip) return c.json({ error: 'name a ip jsou povinné' }, 400)
-  const printer = addPrinter(name, ip)
+  const printer = addPrinter(name, ip, body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT)
   await onPrintersChanged()
   return c.json({ ...printersResponse(), printer })
 })
 
 app.put('/printers/:id', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const patch: { name?: string; ip?: string } = {}
+  const patch: { name?: string; ip?: string; port?: number } = {}
   if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
   if (typeof body.ip === 'string' && body.ip.trim()) patch.ip = body.ip.trim()
+  if (body.port !== undefined) patch.port = parsePort(body.port)
   updatePrinter(c.req.param('id'), patch)
   await onPrintersChanged()
   return c.json(printersResponse())
@@ -244,14 +273,25 @@ app.get('/discover/stream', (c) =>
 // false for jobs whose payload is no longer retained (e.g. loaded after restart).
 app.get('/jobs', (c) => c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id) })) }))
 
-// Re-print a previous job from its retained payload.
-app.post('/jobs/:id/reprint', async (c) => {
+// Jobs currently printing / queued / waiting for the printer to come back.
+app.get('/queue', (c) => c.json({ queue: getQueueJobs() }))
+
+// Re-print (or retry a failed) job from its retained payload.
+app.post('/jobs/:id/reprint', rateLimit, async (c) => {
   const id = Number(c.req.param('id'))
   const entry = getJobEntry(id)
   const payload = getJobPayload(id)
   if (!entry || !payload) return c.json({ error: 'Úloha nebo její data nejsou k dispozici' }, 404)
+  const port = getPrinters().find((p) => p.ip === entry.printerIp)?.port ?? DEFAULT_PORT
   try {
-    await enqueuePrint(entry.printerIp, payload, { source: 'reprint', name: entry.name, pages: entry.pages, copies: entry.copies, format: entry.format })
+    await enqueuePrint(entry.printerIp, payload, {
+      source: 'reprint',
+      name: entry.name,
+      pages: entry.pages,
+      copies: entry.copies,
+      format: entry.format,
+      port,
+    })
     return c.json({ ok: true })
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
@@ -281,13 +321,14 @@ app.get('/health', async (c) => {
 })
 
 // Print a text test receipt (name + IP) to a single printer.
-app.post('/print-test', async (c) => {
+app.post('/print-test', rateLimit, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
   const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Termální tiskárna'
+  const port = body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT
   if (!ip) return c.json({ error: 'IP je povinná' }, 400)
   try {
-    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text' })
+    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port })
     return c.json({ ok: true })
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
@@ -295,13 +336,13 @@ app.post('/print-test', async (c) => {
 })
 
 // Print a test receipt to every discovered printer.
-app.post('/print-test-all', async (c) => {
+app.post('/print-test-all', rateLimit, async (c) => {
   const printers = await discoverPrinters()
   const results = await Promise.all(
     printers.map(async (p) => {
       const name = p.name ?? 'Termální tiskárna'
       try {
-        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text' })
+        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port: p.port })
         return { ip: p.ip, ok: true }
       } catch (err) {
         return { ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }
@@ -309,6 +350,20 @@ app.post('/print-test-all', async (c) => {
     }),
   )
   return c.json({ results })
+})
+
+// Kick the cash drawer connected to a printer.
+app.post('/drawer', rateLimit, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
+  const port = body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT
+  if (!ip) return c.json({ error: 'IP je povinná' }, 400)
+  try {
+    await openCashDrawer(ip, port)
+    return c.json({ ok: true })
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba' }, 502)
+  }
 })
 
 app.use('/*', serveStatic({ root: publicDir }))

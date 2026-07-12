@@ -10,11 +10,15 @@ import { log } from './log.js'
  * to a physical ESC/POS printer. One printer is the default (the "star"): it takes
  * the canonical `ipp/print` path and pre-selects the manual web print.
  */
+export const DEFAULT_PORT = 9100
+
 export interface NetworkPrinter {
 	id: string
 	name: string
 	/** IP of the physical ESC/POS printer this queue forwards to. */
 	ip: string
+	/** Raw-print TCP port (default 9100). */
+	port: number
 	/** Stable UUID advertised over IPP so clients recognise the same printer. */
 	uuid: string
 }
@@ -24,6 +28,7 @@ export interface AdvertisedPrinter {
 	name: string
 	uuid: string
 	targetIp: string
+	targetPort: number
 	resourcePath: string
 	primary: boolean
 }
@@ -37,6 +42,8 @@ export interface Config {
 	brightness: number
 	/** Contrast adjustment, -100…100 (applied before dithering). */
 	contrast: number
+	/** How to cut the paper after a print. */
+	cutMode: CutMode
 	/** All configured network printers (each its own driverless queue). */
 	printers: NetworkPrinter[]
 	/** Id of the default printer (the "star"). */
@@ -45,6 +52,9 @@ export interface Config {
 
 export type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
 export const DITHER_ALGORITHMS: DitherAlgorithm[] = ['floyd', 'atkinson', 'ordered', 'threshold']
+
+export type CutMode = 'full' | 'partial' | 'none'
+export const CUT_MODES: CutMode[] = ['full', 'partial', 'none']
 
 const DEFAULT_NAME = process.env.PRINTER_NAME || 'Thermal Printer'
 
@@ -67,23 +77,24 @@ export function migratePrinters(raw: Record<string, unknown>): { printers: Netwo
 	const byIp = new Set<string>()
 	let defaultId = ''
 
-	const add = (id: string | undefined, name: unknown, ip: unknown, uuid: unknown): string | undefined => {
+	const add = (id: string | undefined, name: unknown, ip: unknown, uuid: unknown, port?: unknown): string | undefined => {
 		if (typeof ip !== 'string' || !ip || byIp.has(ip)) return undefined
 		byIp.add(ip)
 		const printer: NetworkPrinter = {
 			id: id || newId(),
 			name: typeof name === 'string' && name.trim() ? name : DEFAULT_NAME,
 			ip,
+			port: typeof port === 'number' && port > 0 ? port : DEFAULT_PORT,
 			uuid: typeof uuid === 'string' && uuid ? uuid : randomUUID(),
 		}
 		list.push(printer)
 		return printer.id
 	}
 
-	// New-shape entries first (preserve ids/uuids).
+	// New-shape entries first (preserve ids/uuids/port).
 	if (Array.isArray(raw.printers)) {
 		for (const p of raw.printers) {
-			if (p && typeof p.id === 'string' && typeof p.ip === 'string') add(p.id, p.name, p.ip, p.uuid)
+			if (p && typeof p.id === 'string' && typeof p.ip === 'string') add(p.id, p.name, p.ip, p.uuid, p.port)
 		}
 	}
 	// Legacy primary.
@@ -129,6 +140,7 @@ export function getConfig(): Config {
 			: 'floyd',
 		brightness: typeof raw.brightness === 'number' ? raw.brightness : 0,
 		contrast: typeof raw.contrast === 'number' ? raw.contrast : 0,
+		cutMode: CUT_MODES.includes(raw.cutMode as CutMode) ? (raw.cutMode as CutMode) : 'full',
 		printers,
 		defaultPrinterId,
 	}
@@ -163,8 +175,8 @@ export function getDefaultPrinter(): NetworkPrinter | undefined {
 	return cfg.printers.find((p) => p.id === cfg.defaultPrinterId) ?? cfg.printers[0]
 }
 
-export function addPrinter(name: string, ip: string): NetworkPrinter {
-	const printer: NetworkPrinter = { id: newId(), name, ip, uuid: randomUUID() }
+export function addPrinter(name: string, ip: string, port = DEFAULT_PORT): NetworkPrinter {
+	const printer: NetworkPrinter = { id: newId(), name, ip, port: port > 0 ? port : DEFAULT_PORT, uuid: randomUUID() }
 	const cfg = getConfig()
 	const patch: Partial<Config> = { printers: [...cfg.printers, printer] }
 	if (cfg.printers.length === 0) patch.defaultPrinterId = printer.id // first one becomes default
@@ -172,7 +184,7 @@ export function addPrinter(name: string, ip: string): NetworkPrinter {
 	return printer
 }
 
-export function updatePrinter(id: string, patch: Partial<Pick<NetworkPrinter, 'name' | 'ip'>>): NetworkPrinter[] {
+export function updatePrinter(id: string, patch: Partial<Pick<NetworkPrinter, 'name' | 'ip' | 'port'>>): NetworkPrinter[] {
 	const printers = getConfig().printers.map((p) => (p.id === id ? { ...p, ...patch } : p))
 	return setConfig({ printers }).printers
 }
@@ -199,6 +211,7 @@ export function getAdvertisedPrinters(): AdvertisedPrinter[] {
 		name: p.name,
 		uuid: p.uuid,
 		targetIp: p.ip,
+		targetPort: p.port,
 		resourcePath: p.id === def?.id ? 'ipp/print' : `ipp/print/${p.id}`,
 		primary: p.id === def?.id,
 	}))
@@ -211,6 +224,6 @@ export function resolveAdvertisedPrinter(path: string): AdvertisedPrinter {
 	return (
 		all.find((p) => p.resourcePath === rp) ??
 		all.find((p) => p.primary) ??
-		all[0] ?? { name: DEFAULT_NAME, uuid: '', targetIp: '', resourcePath: 'ipp/print', primary: true }
+		all[0] ?? { name: DEFAULT_NAME, uuid: '', targetIp: '', targetPort: DEFAULT_PORT, resourcePath: 'ipp/print', primary: true }
 	)
 }
