@@ -4,6 +4,7 @@ export interface NetworkPrinter {
   id: string
   name: string
   ip: string
+  port: number
   uuid: string
 }
 
@@ -47,8 +48,8 @@ interface Props {
   onSetDefault: (id: string) => void
   onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
-  onTest: (ip: string, name: string) => void
-  onAdd: (name: string, ip: string) => void
+  onTest: (ip: string, name: string, port: number) => void
+  onAdd: (name: string, ip: string, port: number) => void
 }
 
 export default function Printers({
@@ -69,6 +70,7 @@ export default function Printers({
   const [draft, setDraft] = useState('')
   const [manualName, setManualName] = useState('')
   const [manualIp, setManualIp] = useState('')
+  const [manualPort, setManualPort] = useState('')
 
   const configuredIps = new Set(printers.map((p) => p.ip))
   const suggestions = discovered.filter((d) => !configuredIps.has(d.ip))
@@ -129,7 +131,7 @@ export default function Printers({
                     {isDefault && <span className="p-badge">výchozí</span>}
                     {isDefault && defaultBadge && <span className={`reach-badge ${defaultBadge.cls}`}>{defaultBadge.label}</span>}
                   </span>
-                  <span className="p-ip">{p.ip}</span>
+                  <span className="p-ip">{p.port && p.port !== 9100 ? `${p.ip}:${p.port}` : p.ip}</span>
                 </span>
               )}
               <button
@@ -144,7 +146,7 @@ export default function Printers({
               >
                 <PencilIcon />
               </button>
-              <button type="button" className="p-icon" onClick={() => onTest(p.ip, p.name)} title="Vytisknout testovací lístek" aria-label={`Test na ${p.ip}`}>
+              <button type="button" className="p-icon" onClick={() => onTest(p.ip, p.name, p.port)} title="Vytisknout testovací lístek" aria-label={`Test na ${p.ip}`}>
                 <PrinterIcon />
               </button>
               <button type="button" className="p-icon p-remove" onClick={() => onRemove(p.id)} title="Odebrat" aria-label={`Odebrat ${p.name}`}>
@@ -161,7 +163,7 @@ export default function Printers({
           <ul className="printers-suggest">
             {suggestions.map((d) => (
               <li key={d.ip}>
-                <button type="button" onClick={() => onAdd(d.name ?? 'Termální tiskárna', d.ip)}>
+                <button type="button" onClick={() => onAdd(d.name ?? 'Termální tiskárna', d.ip, 9100)}>
                   <span className="p-plus">＋</span>
                   <span className="p-main">
                     <span className="p-name">{d.name ?? 'Termální tiskárna'}</span>
@@ -175,13 +177,23 @@ export default function Printers({
         <div className="printers-manual">
           <input type="text" placeholder="Název (např. Kuchyně)" value={manualName} onChange={(e) => setManualName(e.target.value)} />
           <input type="text" inputMode="numeric" placeholder="IP, např. 192.168.1.50" value={manualIp} onChange={(e) => setManualIp(e.target.value)} />
+          <input
+            type="text"
+            inputMode="numeric"
+            className="p-port-input"
+            placeholder="Port (9100)"
+            value={manualPort}
+            onChange={(e) => setManualPort(e.target.value.replace(/\D/g, ''))}
+          />
           <button
             type="button"
             disabled={!manualName.trim() || !IPV4.test(manualIp.trim())}
             onClick={() => {
-              onAdd(manualName.trim(), manualIp.trim())
+              const port = manualPort.trim() ? Number(manualPort.trim()) : 9100
+              onAdd(manualName.trim(), manualIp.trim(), port > 0 && port <= 65535 ? port : 9100)
               setManualName('')
               setManualIp('')
+              setManualPort('')
             }}
           >
             Přidat

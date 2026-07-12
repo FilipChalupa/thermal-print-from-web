@@ -8,7 +8,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'sw',
+      filename: 'sw.ts',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+      },
       manifest: {
         name: 'Termální tisk',
         short_name: 'Termální tisk',
@@ -23,12 +29,17 @@ export default defineConfig({
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png' },
           { src: 'pwa-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
-      },
-      workbox: {
-        // Never serve the SPA shell for backend API routes.
-        navigateFallbackDenylist: [
-          /^\/(print|print-test|print-test-all|config|discover|printers|virtual-printers|jobs|health)/,
-        ],
+        // Share an image from the phone straight into the print form.
+        share_target: {
+          action: '/share-target',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            title: 'title',
+            text: 'text',
+            files: [{ name: 'images', accept: ['image/*'] }],
+          },
+        },
       },
     }),
   ],
@@ -41,6 +52,8 @@ export default defineConfig({
       '/discover': 'http://localhost:3000',
       '/printers': 'http://localhost:3000',
       '/jobs': 'http://localhost:3000',
+      '/queue': 'http://localhost:3000',
+      '/drawer': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
     },
   },

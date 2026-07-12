@@ -71,6 +71,30 @@ const FORMAT_LABELS: Record<NonNullable<JobLogEntry['format']>, string> = {
   text: 'Text',
 }
 
+type CutMode = 'full' | 'partial' | 'none'
+
+const CUT_LABELS: Record<CutMode, string> = {
+  full: 'Úplný střih',
+  partial: 'Částečný střih',
+  none: 'Bez střihu',
+}
+
+interface QueueJob {
+  id: number
+  ip: string
+  name: string
+  source: JobLogEntry['source']
+  state: 'queued' | 'printing' | 'waiting'
+  copies?: number
+  format?: JobLogEntry['format']
+}
+
+const QUEUE_STATE_LABELS: Record<QueueJob['state'], string> = {
+  printing: 'Tiskne se',
+  queued: 'Ve frontě',
+  waiting: 'Čeká na tiskárnu',
+}
+
 function jobMeta(j: JobLogEntry): string {
   const parts = [j.printerIp || '—']
   if (j.format) parts.push(FORMAT_LABELS[j.format])
@@ -110,7 +134,9 @@ export default function App() {
   const [ditherAlgorithm, setDitherAlgorithm] = useState<DitherAlgorithm>('floyd')
   const [brightness, setBrightness] = useState(0)
   const [contrast, setContrast] = useState(0)
+  const [cutMode, setCutMode] = useState<CutMode>('full')
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
+  const [queue, setQueue] = useState<QueueJob[]>([])
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
   // Live status of the default printer (from /health).
@@ -132,6 +158,13 @@ export default function App() {
     fetch(`${BACKEND_URL}/jobs`)
       .then((r) => (r.ok ? r.json() : { jobs: [] }))
       .then((d) => setJobs(Array.isArray(d.jobs) ? d.jobs : []))
+      .catch(() => {})
+  }
+
+  function refreshQueue() {
+    fetch(`${BACKEND_URL}/queue`)
+      .then((r) => (r.ok ? r.json() : { queue: [] }))
+      .then((d) => setQueue(Array.isArray(d.queue) ? d.queue : []))
       .catch(() => {})
   }
 
@@ -166,6 +199,13 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
+  // Poll the live print queue so users see jobs waiting / printing.
+  useEffect(() => {
+    refreshQueue()
+    const id = setInterval(refreshQueue, 2000)
+    return () => clearInterval(id)
+  }, [])
+
   // Load print settings, printers and recent jobs on mount.
   useEffect(() => {
     fetch(`${BACKEND_URL}/config`)
@@ -176,10 +216,36 @@ export default function App() {
         if (cfg.ditherAlgorithm) setDitherAlgorithm(cfg.ditherAlgorithm)
         if (typeof cfg.brightness === 'number') setBrightness(cfg.brightness)
         if (typeof cfg.contrast === 'number') setContrast(cfg.contrast)
+        if (cfg.cutMode === 'full' || cfg.cutMode === 'partial' || cfg.cutMode === 'none') setCutMode(cfg.cutMode)
       })
       .catch(() => {})
     loadPrinters()
     refreshJobs()
+  }, [])
+
+  // Web Share Target: images shared from the phone land in a cache the SW filled.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('share-target') !== '1') return
+    window.history.replaceState(null, '', window.location.pathname)
+    ;(async () => {
+      try {
+        const cache = await caches.open('thermal-print-shared')
+        const keys = await cache.keys()
+        const shared: File[] = []
+        for (const key of keys) {
+          const res = await cache.match(key)
+          if (!res) continue
+          const blob = await res.blob()
+          const name = decodeURIComponent(res.headers.get('X-Filename') ?? 'sdilene.jpg')
+          shared.push(new File([blob], name, { type: blob.type }))
+          await cache.delete(key)
+        }
+        if (shared.length) addFiles(shared)
+      } catch {
+        /* no shared images available */
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Live discovery over SSE: printers appear as they are found.
@@ -218,11 +284,11 @@ export default function App() {
     if (Array.isArray(d.printers)) setPrinters(d.printers)
     if (typeof d.defaultPrinterId === 'string') setDefaultPrinterId(d.defaultPrinterId)
   }
-  function addPrinter(name: string, ip: string) {
+  function addPrinter(name: string, ip: string, port: number) {
     fetch(`${BACKEND_URL}/printers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, ip }),
+      body: JSON.stringify({ name, ip, port }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -263,7 +329,10 @@ export default function App() {
 
   function reprintJob(id: number) {
     fetch(`${BACKEND_URL}/jobs/${id}/reprint`, { method: 'POST' })
-      .then(() => setTimeout(refreshJobs, 300))
+      .then(() => {
+        refreshQueue()
+        setTimeout(refreshJobs, 300)
+      })
       .catch(() => {})
   }
 
@@ -274,6 +343,31 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paperWidthDots: dots }),
     }).catch(() => {})
+  }
+
+  function changeCutMode(mode: CutMode) {
+    setCutMode(mode)
+    fetch(`${BACKEND_URL}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cutMode: mode }),
+    }).catch(() => {})
+  }
+
+  // Kick the cash drawer wired to the default printer.
+  function openDrawer() {
+    if (!IPV4.test(defaultIp)) return
+    setTesting(true)
+    setTestMsg('Otevírám pokladní zásuvku…')
+    fetch(`${BACKEND_URL}/drawer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: defaultIp, port: defaultPrinter?.port ?? 9100 }),
+    })
+      .then((r) => r.json().catch(() => ({})))
+      .then((d) => setTestMsg(d?.ok ? 'Pokladní zásuvka otevřena ✓' : `Zásuvku se nepodařilo otevřít: ${d?.error ?? 'chyba'}`))
+      .catch(() => setTestMsg('Zásuvku se nepodařilo otevřít'))
+      .finally(() => setTesting(false))
   }
 
   // Persist image/dither settings, debounced so sliders don't spam the backend.
@@ -290,14 +384,14 @@ export default function App() {
   }
 
   // Print a text test receipt so the user can confirm which device an IP is.
-  async function printTest(ip: string, name: string) {
+  async function printTest(ip: string, name: string, port: number) {
     setTesting(true)
     setTestMsg(`Posílám testovací lístek na ${ip}…`)
     try {
       const res = await fetch(`${BACKEND_URL}/print-test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, name }),
+        body: JSON.stringify({ ip, name, port }),
       })
       const d = await res.json().catch(() => ({}))
       setTestMsg(res.ok && d.ok ? `Testovací lístek odeslán na ${ip} ✓` : `Tisk na ${ip} selhal: ${d.error ?? 'chyba'}`)
@@ -412,6 +506,7 @@ export default function App() {
     const formData = new FormData()
     formData.append('ip', defaultIp)
     formData.append('copies', String(copies))
+    if (defaultPrinter?.port) formData.append('port', String(defaultPrinter.port))
     for (const item of items) {
       const blob = await applyRotation(item.file, item.rotation)
       formData.append('images', blob, item.file.name)
@@ -568,6 +663,16 @@ export default function App() {
             </select>
           </label>
           <label className="field">
+            Střih po tisku
+            <select value={cutMode} onChange={(e) => changeCutMode(e.target.value as CutMode)}>
+              {(Object.keys(CUT_LABELS) as CutMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {CUT_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             Dithering
             <select
               value={ditherAlgorithm}
@@ -596,7 +701,36 @@ export default function App() {
             </span>
             <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
           </label>
+          <button type="button" className="drawer-btn" onClick={openDrawer} disabled={testing || !IPV4.test(defaultIp)}>
+            Otevřít pokladní zásuvku
+          </button>
         </details>
+
+        {queue.length > 0 && (
+          <section className="queue card">
+            <div className="jobs-head">
+              <h2>Fronta ({queue.length})</h2>
+            </div>
+            <ul className="jobs-list">
+              {queue.map((q) => (
+                <li key={q.id} className={`queue-item state-${q.state}`}>
+                  <span className={`queue-spinner ${q.state}`} aria-hidden />
+                  <span className="job-main">
+                    <span className="job-name">
+                      <span className="job-source">{jobSourceLabel(q.source)}</span> {q.name}
+                    </span>
+                    <span className="job-meta">
+                      {[q.ip || '—', q.format ? FORMAT_LABELS[q.format] : null, q.copies && q.copies > 1 ? `${q.copies}×` : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                  <span className={`queue-state ${q.state}`}>{QUEUE_STATE_LABELS[q.state]}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {jobs.length > 0 && (
           <section className="jobs card">
@@ -619,8 +753,14 @@ export default function App() {
                     <span className="job-meta">{jobMeta(j)}</span>
                   </span>
                   <span className="job-time">{relativeTime(j.at)}</span>
-                  {j.status === 'ok' && j.reprintable && (
-                    <button type="button" className="job-reprint" onClick={() => reprintJob(j.id)} title="Vytisknout znovu" aria-label="Vytisknout znovu">
+                  {j.reprintable && (
+                    <button
+                      type="button"
+                      className="job-reprint"
+                      onClick={() => reprintJob(j.id)}
+                      title={j.status === 'ok' ? 'Vytisknout znovu' : 'Zkusit znovu'}
+                      aria-label={j.status === 'ok' ? 'Vytisknout znovu' : 'Zkusit znovu'}
+                    >
                       ↻
                     </button>
                   )}

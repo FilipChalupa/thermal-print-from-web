@@ -543,6 +543,103 @@ label {
   border-color: #0070f3;
 }
 
+/* --- Live queue --- */
+.queue {
+  text-align: left;
+}
+
+.queue-item {
+  border-left: 3px solid var(--border);
+}
+
+.queue-item.state-printing {
+  border-left-color: #0070f3;
+}
+
+.queue-item.state-waiting {
+  border-left-color: #d29922;
+}
+
+.queue-spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+}
+
+.queue-spinner.printing {
+  border-top-color: #0070f3;
+  border-right-color: #0070f3;
+  animation: queue-spin 0.8s linear infinite;
+}
+
+.queue-spinner.waiting {
+  border-color: #d29922;
+  background: transparent;
+  animation: queue-pulse 1.2s ease-in-out infinite;
+}
+
+.queue-spinner.queued {
+  background: var(--border);
+}
+
+@keyframes queue-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes queue-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.queue-state {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.queue-state.printing {
+  color: #0070f3;
+}
+
+.queue-state.waiting {
+  color: #d29922;
+}
+
+.drawer-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.drawer-btn:hover:not(:disabled) {
+  border-color: #0070f3;
+}
+
+.drawer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.p-port-input {
+  max-width: 120px;
+}
+
 input[type='text'],
 input[type='number'] {
   padding: 10px 12px;

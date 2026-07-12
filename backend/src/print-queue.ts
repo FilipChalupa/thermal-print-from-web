@@ -43,6 +43,8 @@ export interface QueueJobView {
 	name: string
 	source: PrintMeta['source']
 	state: QueueState
+	copies?: number
+	format?: PrintMeta['format']
 }
 
 const DEFAULT_PORT = 9100
@@ -73,7 +75,8 @@ export function enqueuePrint(ip: string, payload: Buffer, meta: PrintMeta): Prom
 export function getQueueJobs(): QueueJobView[] {
 	const out: QueueJobView[] = []
 	for (const q of queues.values()) {
-		for (const it of q) out.push({ id: it.id, ip: it.ip, name: it.meta.name, source: it.meta.source, state: it.state })
+		for (const it of q)
+			out.push({ id: it.id, ip: it.ip, name: it.meta.name, source: it.meta.source, state: it.state, copies: it.meta.copies, format: it.meta.format })
 	}
 	return out
 }
