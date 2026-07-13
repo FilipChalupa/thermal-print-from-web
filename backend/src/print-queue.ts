@@ -47,6 +47,7 @@ export interface QueueJobView {
 	state: QueueState
 	copies?: number
 	format?: PrintMeta['format']
+	hasPreview: boolean
 }
 
 const DEFAULT_PORT = 9100
@@ -78,9 +79,26 @@ export function getQueueJobs(): QueueJobView[] {
 	const out: QueueJobView[] = []
 	for (const q of queues.values()) {
 		for (const it of q)
-			out.push({ id: it.id, ip: it.ip, name: it.meta.name, source: it.meta.source, state: it.state, copies: it.meta.copies, format: it.meta.format })
+			out.push({
+				id: it.id,
+				ip: it.ip,
+				name: it.meta.name,
+				source: it.meta.source,
+				state: it.state,
+				copies: it.meta.copies,
+				format: it.meta.format,
+				hasPreview: !!it.meta.preview,
+			})
 	}
 	return out
+}
+
+/** The preview image of a job still in the queue (queued / printing / waiting). */
+export function getQueuePreview(id: number): Buffer | undefined {
+	for (const q of queues.values()) {
+		for (const it of q) if (it.id === id) return it.meta.preview
+	}
+	return undefined
 }
 
 async function drain(key: string): Promise<void> {

@@ -22,7 +22,7 @@ import {
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
 import { flushJobs, getJobEntry, getJobLog, getJobPayload, getJobPreview, hasPayload, hasPreview, loadJobs } from './jobs-log.js'
 import { log } from './log.js'
-import { enqueuePrint, getQueueJobs } from './print-queue.js'
+import { enqueuePrint, getQueueJobs, getQueuePreview } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
 import { startIppHttpServer } from './ipp/http.js'
 import type { IppHttpHandle } from './ipp/http.js'
@@ -275,13 +275,21 @@ app.get('/jobs', (c) =>
   c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id), hasPreview: hasPreview(j.id) })) }),
 )
 
-// Monochrome PNG preview of what a job printed (retained in memory, best-effort).
-app.get('/jobs/:id/preview', (c) => {
-  const preview = getJobPreview(Number(c.req.param('id')))
+/** Send a PNG preview buffer, optionally as a download. `null` → 404 JSON. */
+function previewResponse(c: Context, preview: Buffer | undefined) {
   if (!preview) return c.json({ error: 'Náhled není k dispozici' }, 404)
   const ab = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer
-  return c.body(ab, 200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' })
-})
+  const headers: Record<string, string> = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' }
+  if (c.req.query('download') !== undefined) headers['Content-Disposition'] = `attachment; filename="tisk-${c.req.param('id')}.png"`
+  return c.body(ab, 200, headers)
+}
+
+// Monochrome PNG preview of what a job printed (retained in memory, best-effort).
+// Append `?download` to receive it as a file attachment.
+app.get('/jobs/:id/preview', (c) => previewResponse(c, getJobPreview(Number(c.req.param('id')))))
+
+// Same, for a job still in the live queue (preview available before it completes).
+app.get('/queue/:id/preview', (c) => previewResponse(c, getQueuePreview(Number(c.req.param('id')))))
 
 // Jobs currently printing / queued / waiting for the printer to come back.
 app.get('/queue', (c) => c.json({ queue: getQueueJobs() }))

@@ -88,6 +88,7 @@ interface QueueJob {
   state: 'queued' | 'printing' | 'waiting'
   copies?: number
   format?: JobLogEntry['format']
+  hasPreview?: boolean
 }
 
 const QUEUE_STATE_LABELS: Record<QueueJob['state'], string> = {
@@ -137,7 +138,7 @@ export default function App() {
   const [contrast, setContrast] = useState(0)
   const [cutMode, setCutMode] = useState<CutMode>('full')
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
-  const [previewId, setPreviewId] = useState<number | null>(null)
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const [queue, setQueue] = useState<QueueJob[]>([])
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
@@ -717,6 +718,17 @@ export default function App() {
               {queue.map((q) => (
                 <li key={q.id} className={`queue-item state-${q.state}`}>
                   <span className={`queue-spinner ${q.state}`} aria-hidden />
+                  {q.hasPreview && (
+                    <button
+                      type="button"
+                      className="job-thumb"
+                      onClick={() => setPreviewSrc(`${BACKEND_URL}/queue/${q.id}/preview`)}
+                      title="Zobrazit náhled tisku"
+                      aria-label="Zobrazit náhled tisku"
+                    >
+                      <img src={`${BACKEND_URL}/queue/${q.id}/preview`} alt="" loading="lazy" />
+                    </button>
+                  )}
                   <span className="job-main">
                     <span className="job-name">
                       <span className="job-source">{jobSourceLabel(q.source)}</span> {q.name}
@@ -752,7 +764,7 @@ export default function App() {
                     <button
                       type="button"
                       className="job-thumb"
-                      onClick={() => setPreviewId(j.id)}
+                      onClick={() => setPreviewSrc(`${BACKEND_URL}/jobs/${j.id}/preview`)}
                       title="Zobrazit náhled tisku"
                       aria-label="Zobrazit náhled tisku"
                     >
@@ -783,17 +795,23 @@ export default function App() {
           </section>
         )}
 
-        {previewId !== null && (
-          <div className="preview-overlay" role="dialog" aria-modal="true" onClick={() => setPreviewId(null)}>
-            <img
-              className="preview-full"
-              src={`${BACKEND_URL}/jobs/${previewId}/preview`}
-              alt="Náhled tisku"
-              onClick={(e) => e.stopPropagation()}
-            />
-            <button type="button" className="preview-close" onClick={() => setPreviewId(null)} aria-label="Zavřít">
-              ✕
-            </button>
+        {previewSrc !== null && (
+          <div className="preview-overlay" role="dialog" aria-modal="true" onClick={() => setPreviewSrc(null)}>
+            <img className="preview-full" src={previewSrc} alt="Náhled tisku" onClick={(e) => e.stopPropagation()} />
+            <div className="preview-toolbar" onClick={(e) => e.stopPropagation()}>
+              <a
+                className="preview-download"
+                href={`${previewSrc}?download`}
+                download
+                title="Stáhnout náhled (PNG)"
+                aria-label="Stáhnout náhled"
+              >
+                ↓
+              </a>
+              <button type="button" className="preview-close" onClick={() => setPreviewSrc(null)} aria-label="Zavřít">
+                ✕
+              </button>
+            </div>
           </div>
         )}
       </main>
