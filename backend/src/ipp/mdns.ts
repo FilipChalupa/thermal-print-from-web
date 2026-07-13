@@ -19,13 +19,18 @@ export function startMdns(options: { port: number }): MdnsHandle {
 	// One `_ipp._tcp` service per advertised printer (primary + extra queues),
 	// each on its own resource path so the OS treats them as distinct printers.
 	for (const printer of getAdvertisedPrinters()) {
+		// Disambiguate otherwise-identical printers on the network: append the IP's
+		// last octet to the advertised name (e.g. "Termální tiskárna (119)") and put
+		// the full target IP in `note` — the OS shows it as the printer's Location.
+		const lastOctet = /^\d+\.\d+\.\d+\.(\d+)$/.exec(printer.targetIp)?.[1]
+		const advertisedName = lastOctet ? `${printer.name} (${lastOctet})` : printer.name
 		const txt: Record<string, string> = {
 			txtvers: '1',
 			qtotal: '1',
 			rp: printer.resourcePath,
 			ty: MAKE_AND_MODEL,
 			product: `(${printer.name})`,
-			note: '',
+			note: printer.targetIp,
 			pdl: PDL_SUPPORTED.join(','),
 			URF: URF_SUPPORTED.join(','),
 			UUID: printer.uuid,
@@ -43,7 +48,7 @@ export function startMdns(options: { port: number }): MdnsHandle {
 		}
 		// `_universal._sub._ipp._tcp` is the AirPrint discovery subtype.
 		const service = bonjour.publish({
-			name: printer.name,
+			name: advertisedName,
 			type: 'ipp',
 			protocol: 'tcp',
 			port: options.port,
@@ -51,7 +56,7 @@ export function startMdns(options: { port: number }): MdnsHandle {
 			subtypes: ['universal'],
 		})
 		service.on('error', (err) => log.error('mDNS advertising error:', err))
-		log.info(`mDNS: advertising "${printer.name}" (/${printer.resourcePath}) as _ipp._tcp on port ${options.port}`)
+		log.info(`mDNS: advertising "${advertisedName}" (/${printer.resourcePath}) as _ipp._tcp on port ${options.port}`)
 	}
 
 	return {
