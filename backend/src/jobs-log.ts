@@ -9,6 +9,7 @@ import { readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { log } from './log.js'
+import type { PreviewImages } from './printer.js'
 
 export type JobFormat = 'image' | 'pdf' | 'raster' | 'text'
 
@@ -37,7 +38,7 @@ const JOBS_PATH =
 
 const entries: JobLogEntry[] = []
 const payloads = new Map<number, Buffer>()
-const previews = new Map<number, Buffer>()
+const previews = new Map<number, PreviewImages>()
 let payloadTotal = 0
 let previewTotal = 0
 let nextId = 1
@@ -104,15 +105,19 @@ function dropPayload(id: number): void {
 	}
 }
 
+function previewBytes(p: PreviewImages): number {
+	return p.full.length + p.thumb.length
+}
+
 function dropPreview(id: number): void {
-	const buf = previews.get(id)
-	if (buf) {
-		previewTotal -= buf.length
+	const p = previews.get(id)
+	if (p) {
+		previewTotal -= previewBytes(p)
 		previews.delete(id)
 	}
 }
 
-export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer, preview?: Buffer): number {
+export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer, preview?: PreviewImages): number {
 	const id = nextId++
 	entries.unshift({ ...entry, id, at: Date.now() })
 
@@ -125,10 +130,10 @@ export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer, 
 		}
 	}
 
-	// Retain a preview image (to show in the history), within its own budget.
-	if (preview && preview.length) {
+	// Retain preview images (to show in the history), within their own budget.
+	if (preview) {
 		previews.set(id, preview)
-		previewTotal += preview.length
+		previewTotal += previewBytes(preview)
 		while (previewTotal > MAX_PREVIEW_TOTAL_BYTES && previews.size > 1) {
 			dropPreview(Math.min(...previews.keys()))
 		}
@@ -169,7 +174,12 @@ export function hasPreview(id: number): boolean {
 	return previews.has(id)
 }
 
-/** The monochrome PNG preview of what a job printed, if still retained. */
-export function getJobPreview(id: number): Buffer | undefined {
+/** One rendition (full / thumb) of a job's preview, if still retained. */
+export function getJobPreview(id: number, kind: keyof PreviewImages): Buffer | undefined {
+	return previews.get(id)?.[kind]
+}
+
+/** Both preview renditions of a job (e.g. to carry over into a reprint). */
+export function getJobPreviewImages(id: number): PreviewImages | undefined {
 	return previews.get(id)
 }

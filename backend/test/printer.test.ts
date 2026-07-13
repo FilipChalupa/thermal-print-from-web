@@ -178,18 +178,33 @@ describe('job preview', () => {
 		return rgba
 	}
 
-	it('buildRasterJob returns a PNG preview for a page with content', async () => {
+	it('buildRasterJob returns full + thumbnail PNG previews for a page with content', async () => {
 		config.setConfig({ paperWidthDots: 576 })
 		const rgba = rasterWithBox(300, 400, { x: 50, y: 50, w: 200, h: 200 })
 		const { payload, preview } = await printer.buildRasterJob([{ width: 300, height: 400, rgba }], 1)
 		expect(payload.length).toBeGreaterThan(0)
-		expect(isPng(preview)).toBe(true)
+		const imgs = await preview
+		expect(isPng(imgs?.full)).toBe(true)
+		expect(isPng(imgs?.thumb)).toBe(true)
+		// The thumbnail is materially smaller than the full preview.
+		expect(imgs!.thumb.length).toBeLessThan(imgs!.full.length)
 	})
 
 	it('buildRasterJob yields no preview for a fully blank page', async () => {
 		const rgba = new Uint8ClampedArray(300 * 400 * 4).fill(255)
 		const { preview } = await printer.buildRasterJob([{ width: 300, height: 400, rgba }], 1)
-		expect(preview).toBeUndefined()
+		expect(await preview).toBeUndefined()
+	})
+
+	it('caps the full preview height for a very long receipt', async () => {
+		config.setConfig({ paperWidthDots: 576 })
+		// Content spans a 576×6000 page — taller than the 4000px preview cap.
+		const rgba = rasterWithBox(576, 6000, { x: 20, y: 0, w: 536, h: 6000 })
+		const { preview } = await printer.buildRasterJob([{ width: 576, height: 6000, rgba }], 1)
+		const imgs = await preview
+		// PNG IHDR height lives at byte offset 20 (big-endian uint32).
+		const pngHeight = imgs!.full.readUInt32BE(20)
+		expect(pngHeight).toBeLessThanOrEqual(4000)
 	})
 })
 

@@ -163,23 +163,34 @@ function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: n
   return bitmapToEscPos(drawableToBitmap(source, srcWidth, srcHeight))
 }
 
+/** A full-size preview PNG plus a small thumbnail, both of the printed output. */
+export interface PreviewImages {
+  full: Buffer
+  thumb: Buffer
+}
+
+const PREVIEW_MAX_HEIGHT = 4000 // cap the full preview so a long receipt stays small
+const THUMB_WIDTH = 100 // thumbnail is tiny — history/queue only render it ~34px
+const THUMB_MAX_HEIGHT = 240 // show the top of a long receipt, not a hair-thin strip
+
 /**
- * Stitch the job's dithered bitmaps vertically into a single monochrome PNG —
- * a faithful "what was printed" preview for the print history.
+ * Stitch the job's dithered bitmaps vertically into a monochrome image and
+ * render both a size-capped full preview and a small thumbnail — a faithful
+ * "what was printed" view for the print history, without shipping a giant PNG.
  */
-async function bitmapsToPreviewPng(bitmaps: Bitmap[]): Promise<Buffer | undefined> {
+async function bitmapsToPreviewImages(bitmaps: Bitmap[]): Promise<PreviewImages | undefined> {
   const totalHeight = bitmaps.reduce((sum, b) => sum + b.height, 0)
   if (!totalHeight) return undefined
   const width = Math.max(...bitmaps.map((b) => b.width))
 
-  const canvas = new Canvas(width, totalHeight)
-  const ctx = canvas.getContext('2d')
-  ctx.fillStyle = 'white'
-  ctx.fillRect(0, 0, width, totalHeight)
+  const full = new Canvas(width, totalHeight)
+  const fctx = full.getContext('2d')
+  fctx.fillStyle = 'white'
+  fctx.fillRect(0, 0, width, totalHeight)
 
   let offsetY = 0
   for (const bm of bitmaps) {
-    const img = ctx.createImageData(bm.width, bm.height)
+    const img = fctx.createImageData(bm.width, bm.height)
     const bytesPerRow = Math.ceil(bm.width / 8)
     for (let y = 0; y < bm.height; y++) {
       for (let x = 0; x < bm.width; x++) {
@@ -190,10 +201,28 @@ async function bitmapsToPreviewPng(bitmaps: Bitmap[]): Promise<Buffer | undefine
         img.data[di + 3] = 255
       }
     }
-    ctx.putImageData(img, 0, offsetY)
+    fctx.putImageData(img, 0, offsetY)
     offsetY += bm.height
   }
-  return await canvas.toBuffer('png')
+
+  // Full preview: downscale uniformly if the receipt is taller than the cap.
+  let fullSource: Canvas = full
+  if (totalHeight > PREVIEW_MAX_HEIGHT) {
+    const s = PREVIEW_MAX_HEIGHT / totalHeight
+    const scaled = new Canvas(Math.max(1, Math.round(width * s)), PREVIEW_MAX_HEIGHT)
+    scaled.getContext('2d').drawImage(full, 0, 0, scaled.width, scaled.height)
+    fullSource = scaled
+  }
+
+  // Thumbnail: fit to THUMB_WIDTH, showing the top of a long receipt.
+  const ts = THUMB_WIDTH / width
+  const thumbH = Math.min(Math.round(totalHeight * ts), THUMB_MAX_HEIGHT)
+  const srcH = Math.min(totalHeight, Math.round(thumbH / ts))
+  const thumb = new Canvas(THUMB_WIDTH, Math.max(1, thumbH))
+  thumb.getContext('2d').drawImage(full, 0, 0, width, srcH, 0, 0, THUMB_WIDTH, thumb.height)
+
+  const [fullBuf, thumbBuf] = await Promise.all([fullSource.toBuffer('png'), thumb.toBuffer('png')])
+  return { full: fullBuf, thumb: thumbBuf }
 }
 
 async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
@@ -315,10 +344,14 @@ async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<B
   return assembleCopies(await imageToEscPos(imageBuffer), copies)
 }
 
-/** An assembled ESC/POS payload plus a monochrome PNG preview of what it prints. */
+/**
+ * An assembled ESC/POS payload plus the preview images. `preview` is a promise
+ * that is deliberately NOT awaited here: the payload can be queued and printed
+ * while the (cosmetic) preview renders concurrently, off the print critical path.
+ */
 export interface PrintBuild {
   payload: Buffer
-  preview?: Buffer
+  preview: Promise<PreviewImages | undefined>
 }
 
 /** Build several images back-to-back (each cut), shared init, with a preview. */
@@ -336,7 +369,7 @@ export async function buildImagesJob(imageBuffers: Buffer[], copies: number): Pr
   // included, so repeat the chunk block once per copy.
   const parts: Buffer[] = [INIT, CENTER_ALIGN]
   for (let i = 0; i < copies; i++) parts.push(...chunks)
-  return { payload: Buffer.concat(parts), preview: await bitmapsToPreviewPng(bitmaps) }
+  return { payload: Buffer.concat(parts), preview: bitmapsToPreviewImages(bitmaps) }
 }
 
 /** Build decoded raster pages (from an IPP job) into a payload, with a preview. */
@@ -349,7 +382,7 @@ export async function buildRasterJob(pages: RasterPage[], copies: number): Promi
     bitmaps.push(bm)
     chunks.push(...bitmapToEscPos(bm))
   }
-  return { payload: assembleCopies(chunks, copies), preview: await bitmapsToPreviewPng(bitmaps) }
+  return { payload: assembleCopies(chunks, copies), preview: bitmapsToPreviewImages(bitmaps) }
 }
 
 /** Build the ESC/POS payload for decoded raster pages (from an IPP job). */

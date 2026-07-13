@@ -13,6 +13,7 @@ import { logJob } from './jobs-log.js'
 import type { JobFormat } from './jobs-log.js'
 import { tcpReachable } from './printer-status.js'
 import { sendEscPos } from './printer.js'
+import type { PreviewImages } from './printer.js'
 
 export interface PrintMeta {
 	source: 'ipp' | 'web' | 'test' | 'reprint'
@@ -22,8 +23,12 @@ export interface PrintMeta {
 	format?: JobFormat
 	/** Raw-print port of the target printer (default 9100). */
 	port?: number
-	/** Monochrome PNG preview of what this job prints, for the history view. */
-	preview?: Buffer
+	/**
+	 * Preview images of what this job prints, for the history view. A promise so
+	 * printing need not wait for the (cosmetic) render — resolved value is cached
+	 * on the queue item and logged with the job once it finishes.
+	 */
+	preview?: Promise<PreviewImages | undefined>
 }
 
 export type QueueState = 'queued' | 'printing' | 'waiting'
@@ -35,6 +40,8 @@ interface QueueItem {
 	payload: Buffer
 	meta: PrintMeta
 	state: QueueState
+	/** Resolved preview images (once meta.preview settles), for the live queue view. */
+	previewImages?: PreviewImages
 	resolve: () => void
 	reject: (err: Error) => void
 }
@@ -68,7 +75,13 @@ export function enqueuePrint(ip: string, payload: Buffer, meta: PrintMeta): Prom
 	return new Promise((resolve, reject) => {
 		const key = keyOf(ip, port)
 		const q = queues.get(key) ?? []
-		q.push({ id: queueJobId++, ip, port, payload, meta, state: 'queued', resolve, reject })
+		const item: QueueItem = { id: queueJobId++, ip, port, payload, meta, state: 'queued', resolve, reject }
+		// Cache the preview on the item once it renders, so the live queue view can
+		// show a thumbnail without awaiting.
+		void meta.preview?.then((imgs) => {
+			item.previewImages = imgs
+		}).catch(() => {})
+		q.push(item)
 		queues.set(key, q)
 		void drain(key)
 	})
@@ -87,16 +100,16 @@ export function getQueueJobs(): QueueJobView[] {
 				state: it.state,
 				copies: it.meta.copies,
 				format: it.meta.format,
-				hasPreview: !!it.meta.preview,
+				hasPreview: !!it.previewImages,
 			})
 	}
 	return out
 }
 
 /** The preview image of a job still in the queue (queued / printing / waiting). */
-export function getQueuePreview(id: number): Buffer | undefined {
+export function getQueuePreview(id: number, kind: keyof PreviewImages): Buffer | undefined {
 	for (const q of queues.values()) {
-		for (const it of q) if (it.id === id) return it.meta.preview
+		for (const it of q) if (it.id === id) return it.previewImages?.[kind]
 	}
 	return undefined
 }
@@ -108,13 +121,16 @@ async function drain(key: string): Promise<void> {
 		const q = queues.get(key)
 		while (q && q.length) {
 			const item = q[0]
-			const { source, name, pages, copies, format, preview } = item.meta
+			const { source, name, pages, copies, format } = item.meta
 			try {
 				await deliver(item)
+				// The preview renders concurrently with printing; grab it (if ready).
+				const preview = item.previewImages ?? (await item.meta.preview?.catch(() => undefined))
 				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'ok' }, item.payload, preview)
 				item.resolve()
 			} catch (err) {
 				const error = err instanceof Error ? err.message : 'Chyba tisku'
+				const preview = item.previewImages ?? (await item.meta.preview?.catch(() => undefined))
 				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'error', error }, item.payload, preview)
 				notifyFailure(item.ip, name, error)
 				item.reject(err instanceof Error ? err : new Error(error))

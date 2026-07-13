@@ -139,6 +139,13 @@ export default function App() {
   const [cutMode, setCutMode] = useState<CutMode>('full')
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+  // Close the preview lightbox on Escape.
+  useEffect(() => {
+    if (previewSrc === null) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPreviewSrc(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [previewSrc])
   const [queue, setQueue] = useState<QueueJob[]>([])
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
@@ -726,7 +733,7 @@ export default function App() {
                       title="Zobrazit náhled tisku"
                       aria-label="Zobrazit náhled tisku"
                     >
-                      <img src={`${BACKEND_URL}/queue/${q.id}/preview`} alt="" loading="lazy" />
+                      <img src={`${BACKEND_URL}/queue/${q.id}/preview?thumb`} alt="" loading="lazy" />
                     </button>
                   )}
                   <span className="job-main">
@@ -768,7 +775,7 @@ export default function App() {
                       title="Zobrazit náhled tisku"
                       aria-label="Zobrazit náhled tisku"
                     >
-                      <img src={`${BACKEND_URL}/jobs/${j.id}/preview`} alt="" loading="lazy" />
+                      <img src={`${BACKEND_URL}/jobs/${j.id}/preview?thumb`} alt="" loading="lazy" />
                     </button>
                   )}
                   <span className="job-main">

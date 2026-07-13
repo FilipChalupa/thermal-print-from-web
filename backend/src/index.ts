@@ -20,7 +20,7 @@ import {
   updatePrinter,
 } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
-import { flushJobs, getJobEntry, getJobLog, getJobPayload, getJobPreview, hasPayload, hasPreview, loadJobs } from './jobs-log.js'
+import { flushJobs, getJobEntry, getJobLog, getJobPayload, getJobPreview, getJobPreviewImages, hasPayload, hasPreview, loadJobs } from './jobs-log.js'
 import { log } from './log.js'
 import { enqueuePrint, getQueueJobs, getQueuePreview } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
@@ -291,12 +291,15 @@ function previewResponse(c: Context, preview: Buffer | undefined, immutable: boo
   return c.body(ab, 200, headers)
 }
 
+/** `?thumb` selects the small thumbnail rendition; otherwise the full preview. */
+const previewKind = (c: Context): 'full' | 'thumb' => (c.req.query('thumb') !== undefined ? 'thumb' : 'full')
+
 // Monochrome PNG preview of what a job printed (retained in memory, best-effort).
-// Append `?download` to receive it as a file attachment.
-app.get('/jobs/:id/preview', (c) => previewResponse(c, getJobPreview(Number(c.req.param('id'))), true))
+// `?thumb` for the small rendition, `?download` to receive it as a file.
+app.get('/jobs/:id/preview', (c) => previewResponse(c, getJobPreview(Number(c.req.param('id')), previewKind(c)), true))
 
 // Same, for a job still in the live queue (preview available before it completes).
-app.get('/queue/:id/preview', (c) => previewResponse(c, getQueuePreview(Number(c.req.param('id'))), false))
+app.get('/queue/:id/preview', (c) => previewResponse(c, getQueuePreview(Number(c.req.param('id')), previewKind(c)), false))
 
 // Jobs currently printing / queued / waiting for the printer to come back.
 app.get('/queue', (c) => c.json({ queue: getQueueJobs() }))
@@ -316,7 +319,7 @@ app.post('/jobs/:id/reprint', rateLimit, async (c) => {
       copies: entry.copies,
       format: entry.format,
       port,
-      preview: getJobPreview(id), // carry the original's preview to the reprint
+      preview: Promise.resolve(getJobPreviewImages(id)), // carry the original's preview to the reprint
     })
     return c.json({ ok: true })
   } catch (err) {
