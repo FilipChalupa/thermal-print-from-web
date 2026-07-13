@@ -829,7 +829,8 @@ button[type='submit']:hover:not(:disabled) {
 }
 
 button[type='submit']:disabled {
-  background: #aaa;
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
   cursor: not-allowed;
 }
 
