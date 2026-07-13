@@ -43,7 +43,13 @@ const DPI = 203
 /** Document formats we accept, shared with the mDNS `pdl` TXT record. */
 export const PDL_SUPPORTED = ['image/urf', 'image/pwg-raster', 'application/pdf', 'application/octet-stream']
 export const MAKE_AND_MODEL = 'Thermal Printer (ESC/POS bridge)'
-const MEDIA_HEIGHT_HMM = 29700 // 297 mm default page length
+// A continuous roll has no fixed page length: advertise the y-dimension as a
+// range so driverless clients can size a page to its content (macOS auto-fits;
+// others gain a custom size) instead of padding to a fixed sheet. The default
+// keyword still names a nominal length for clients that want one.
+const MEDIA_MIN_HEIGHT_HMM = 1000 // 10 mm — shortest sensible receipt
+const MEDIA_MAX_HEIGHT_HMM = 300000 // 3000 mm — effectively "as long as needed"
+const MEDIA_HEIGHT_HMM = 29700 // 297 mm nominal default page length
 
 type JobState = 3 | 5 | 7 | 8 | 9 // pending | processing | canceled | aborted | completed
 
@@ -76,6 +82,18 @@ function uptime(): number {
 /** URF is Apple's capability string; required for AirPrint on macOS/iOS. */
 export const URF_SUPPORTED = ['V1.4', 'CP1', `RS${DPI}`, 'W8', 'SRGB24', 'DM1', 'FN3', 'PQ4']
 
+/** A media-size collection: fixed roll width, variable (range) length. */
+function mediaSizeCollection(widthHmm: number) {
+	return {
+		tag: ValueTag.begCollection,
+		value: {
+			'x-dimension': [{ tag: ValueTag.integer, value: widthHmm }],
+			// Variable length: a range signals a continuous roll to driverless clients.
+			'y-dimension': [{ tag: ValueTag.rangeOfInteger, value: { lower: MEDIA_MIN_HEIGHT_HMM, upper: MEDIA_MAX_HEIGHT_HMM } }],
+		},
+	}
+}
+
 function mediaColCollection(widthHmm: number): IppAttribute {
 	return {
 		name: 'media-col-database',
@@ -83,15 +101,7 @@ function mediaColCollection(widthHmm: number): IppAttribute {
 			{
 				tag: ValueTag.begCollection,
 				value: {
-					'media-size': [
-						{
-							tag: ValueTag.begCollection,
-							value: {
-								'x-dimension': [{ tag: ValueTag.integer, value: widthHmm }],
-								'y-dimension': [{ tag: ValueTag.integer, value: MEDIA_HEIGHT_HMM }],
-							},
-						},
-					],
+					'media-size': [mediaSizeCollection(widthHmm)],
 					'media-bottom-margin': [{ tag: ValueTag.integer, value: 0 }],
 					'media-top-margin': [{ tag: ValueTag.integer, value: 0 }],
 					'media-left-margin': [{ tag: ValueTag.integer, value: 0 }],
@@ -100,6 +110,11 @@ function mediaColCollection(widthHmm: number): IppAttribute {
 			},
 		],
 	}
+}
+
+/** `media-size-supported`: mirrors the roll's fixed width + variable length. */
+function mediaSizeSupported(widthHmm: number): IppAttribute {
+	return { name: 'media-size-supported', values: [mediaSizeCollection(widthHmm)] }
 }
 
 /** Map the monitored primary-printer status to an IPP state + reason. */
@@ -117,7 +132,12 @@ function buildPrinterAttributes(printerUri: string, printer: AdvertisedPrinter):
 	const cfg = getConfig()
 	const uuid = `urn:uuid:${printer.uuid}`
 	const mediaWidthHmm = paperWidthHmm(cfg.paperWidthDots)
-	const mediaName = `om_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm_${mediaWidthHmm / 100}x${MEDIA_HEIGHT_HMM / 100}mm`
+	const mmW = mediaWidthHmm / 100
+	const mediaName = `om_${mmW}x${MEDIA_HEIGHT_HMM / 100}mm_${mmW}x${MEDIA_HEIGHT_HMM / 100}mm`
+	// PWG self-describing names for the roll's variable-length range, so clients
+	// that read only `media-supported` still see it's a continuous/custom roll.
+	const customMin = `custom_min_${mmW}x${MEDIA_MIN_HEIGHT_HMM / 100}mm_${mmW}x${MEDIA_MIN_HEIGHT_HMM / 100}mm`
+	const customMax = `custom_max_${mmW}x${MEDIA_MAX_HEIGHT_HMM / 100}mm_${mmW}x${MEDIA_MAX_HEIGHT_HMM / 100}mm`
 
 	// Reflect the downstream printer's condition (offline / out of paper / cover
 	// open) so the OS shows the queue accordingly. We only actively monitor the
@@ -173,11 +193,12 @@ function buildPrinterAttributes(printerUri: string, printer: AdvertisedPrinter):
 		attr.enum('finishings-default', 3),
 		attr.keyword('output-bin-supported', 'face-up'),
 		attr.keyword('output-bin-default', 'face-up'),
-		// Media (roll; width follows the configured paper size).
-		attr.keyword('media-supported', mediaName),
+		// Media (continuous roll; fixed width, variable length via the range).
+		attr.keyword('media-supported', [mediaName, customMin, customMax]),
 		attr.keyword('media-default', mediaName),
 		attr.keyword('media-ready', mediaName),
 		mediaColCollection(mediaWidthHmm),
+		mediaSizeSupported(mediaWidthHmm),
 		attr.keyword('media-source-supported', 'main'),
 		attr.keyword('media-type-supported', 'labels'),
 		attr.range('copies-supported', 1, 99),
