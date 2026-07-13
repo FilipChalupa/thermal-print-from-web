@@ -16,9 +16,10 @@ Webová aplikace pro tisk obrázků na termální tiskárně Epson přes ESC/POS
 - **Testovací lístek** na jednu nebo všechny nalezené tiskárny
 - **Šířka papíru** 80 mm (576 bodů) / 58 mm (384 bodů)
 - **Úpravy obrazu** — dithering (Floyd–Steinberg / Atkinson / Ordered / práh) + jas a kontrast
-- **Fronta tisku** — serializace na tiskárnu a opakování, když je krátce offline
+- **Fronta tisku** — serializace na tiskárnu a opakování, když je krátce offline (s živým náhledem miniatury)
 - **Stav tiskárny** — online / offline / došel papír / otevřené víko (přes ESC/POS `DLE EOT`), promítnuto i do IPP
-- **Historie úloh** s možností přetisku
+- **Historie úloh** — náhled vytištěného obrázku (miniatura → zvětšení → stažení PNG) a přetisk
+- **Bez plýtvání rolí** — u systémového tisku se obsah automaticky ořízne na jeho ohraničení (žádné prázdné metry papíru) a role se ohlašuje jako médium s proměnnou délkou
 - **Více síťových tiskáren** — každá jako samostatná AirPrint fronta mířící na jinou fyzickou tiskárnu
 
 ## Síťová tiskárna bez ovladačů (AirPrint / IPP Everywhere)
@@ -29,7 +30,7 @@ Jak to funguje:
 
 - Server se ohlašuje přes **mDNS/Bonjour** (`_ipp._tcp`, včetně AirPrint subtypu `_universal`), takže ho OS sám najde a nabídne přidání.
 - Implementuje **IPP** server (RFC 8011 + IPP Everywhere): `Get-Printer-Attributes`, `Validate-Job`, `Print-Job`, `Create-Job`/`Send-Document`, `Get-Jobs`, `Cancel-Job`.
-- OS pošle stránku jako **PWG Raster** (`image/pwg-raster`) nebo **Apple Raster / URF** (`image/urf`). Ta se dekóduje, přeškáluje na šířku tiskárny (576 dotů / 80 mm role, 203 dpi), Floyd–Steinberg dither a odešle jako ESC/POS na fyzickou tiskárnu.
+- OS pošle stránku jako **PWG Raster** (`image/pwg-raster`) nebo **Apple Raster / URF** (`image/urf`). Ta se dekóduje, **ořízne na obsah** (OS ji vysází na pevnou stránku, tj. spousta bílého okraje — na kontinuální roli by to bylo plýtvání), přeškáluje na šířku tiskárny (576 dotů / 80 mm role, 203 dpi), Floyd–Steinberg dither a odešle jako ESC/POS. Role se navíc hlásí jako médium s **proměnnou délkou** (rozsah), aby klient stránku ideálně vysázel rovnou na výšku obsahu.
 
 - OS pošle stránku i jako **PDF** (`application/pdf`) — vyrenderuje se přes MuPDF.
 
