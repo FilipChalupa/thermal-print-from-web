@@ -339,11 +339,6 @@ export async function buildImagesJob(imageBuffers: Buffer[], copies: number): Pr
   return { payload: Buffer.concat(parts), preview: await bitmapsToPreviewPng(bitmaps) }
 }
 
-/** Build a payload from several images back-to-back (each cut), shared init. */
-export async function buildImagesPayload(imageBuffers: Buffer[], copies: number): Promise<Buffer> {
-  return (await buildImagesJob(imageBuffers, copies)).payload
-}
-
 /** Build decoded raster pages (from an IPP job) into a payload, with a preview. */
 export async function buildRasterJob(pages: RasterPage[], copies: number): Promise<PrintBuild> {
   const bitmaps: Bitmap[] = []

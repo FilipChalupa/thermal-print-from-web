@@ -275,21 +275,28 @@ app.get('/jobs', (c) =>
   c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id), hasPreview: hasPreview(j.id) })) }),
 )
 
-/** Send a PNG preview buffer, optionally as a download. `null` → 404 JSON. */
-function previewResponse(c: Context, preview: Buffer | undefined) {
+/**
+ * Send a PNG preview buffer, optionally as a download. `null` → 404 JSON.
+ * `immutable` is safe only for stable ids (job-log ids are monotonic); queue
+ * ids are recycled across restarts, so those must not be cached.
+ */
+function previewResponse(c: Context, preview: Buffer | undefined, immutable: boolean) {
   if (!preview) return c.json({ error: 'Náhled není k dispozici' }, 404)
   const ab = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer
-  const headers: Record<string, string> = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' }
+  const headers: Record<string, string> = {
+    'Content-Type': 'image/png',
+    'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
+  }
   if (c.req.query('download') !== undefined) headers['Content-Disposition'] = `attachment; filename="tisk-${c.req.param('id')}.png"`
   return c.body(ab, 200, headers)
 }
 
 // Monochrome PNG preview of what a job printed (retained in memory, best-effort).
 // Append `?download` to receive it as a file attachment.
-app.get('/jobs/:id/preview', (c) => previewResponse(c, getJobPreview(Number(c.req.param('id')))))
+app.get('/jobs/:id/preview', (c) => previewResponse(c, getJobPreview(Number(c.req.param('id'))), true))
 
 // Same, for a job still in the live queue (preview available before it completes).
-app.get('/queue/:id/preview', (c) => previewResponse(c, getQueuePreview(Number(c.req.param('id')))))
+app.get('/queue/:id/preview', (c) => previewResponse(c, getQueuePreview(Number(c.req.param('id'))), false))
 
 // Jobs currently printing / queued / waiting for the printer to come back.
 app.get('/queue', (c) => c.json({ queue: getQueueJobs() }))
