@@ -543,6 +543,67 @@ label {
   border-color: #0070f3;
 }
 
+.job-thumb {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: zoom-in;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.job-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
+/* --- Print preview lightbox --- */
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.preview-full {
+  max-width: min(90vw, 420px);
+  max-height: 90vh;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  cursor: default;
+}
+
+.preview-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
 /* --- Live queue --- */
 .queue {
   text-align: left;

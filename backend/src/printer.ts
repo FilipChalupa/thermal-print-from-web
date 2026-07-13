@@ -107,12 +107,19 @@ export function halftone(
   return result
 }
 
+/** A dithered 1-bit-per-pixel bitmap at the printer width (bit set = black dot). */
+interface Bitmap {
+  bits: Uint8Array
+  width: number
+  height: number
+}
+
 /**
  * Scale any drawable (a decoded image or a raster page rendered onto a Canvas)
- * to the printer width, Floyd–Steinberg dither it and emit ESC/POS raster
- * (`GS v 0`) chunks.
+ * to the printer width and Floyd–Steinberg dither it to the 1-bit bitmap that is
+ * both sent to the printer and rendered as the job's preview.
  */
-function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: number): Buffer[] {
+function drawableToBitmap(source: Image | Canvas, srcWidth: number, srcHeight: number): Bitmap {
   const printWidth = printWidthDots()
   const scale = printWidth / srcWidth
   const printHeight = Math.max(1, Math.round(srcHeight * scale))
@@ -128,24 +135,65 @@ function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: n
     brightness: cfg.brightness,
     contrast: cfg.contrast,
   })
-  const bytesPerRow = Math.ceil(printWidth / 8)
-  const chunkHeight = 1024
+  return { bits, width: printWidth, height: printHeight }
+}
 
+/** Emit ESC/POS raster (`GS v 0`) chunks for a dithered bitmap. */
+function bitmapToEscPos(bm: Bitmap): Buffer[] {
+  const bytesPerRow = Math.ceil(bm.width / 8)
+  const chunkHeight = 1024
   const buffers: Buffer[] = []
 
-  for (let y = 0; y < printHeight; y += chunkHeight) {
-    const h = Math.min(chunkHeight, printHeight - y)
+  for (let y = 0; y < bm.height; y += chunkHeight) {
+    const h = Math.min(chunkHeight, bm.height - y)
     const xL = bytesPerRow & 0xff
     const xH = (bytesPerRow >> 8) & 0xff
     const yL = h & 0xff
     const yH = (h >> 8) & 0xff
 
     const header = Buffer.from([0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH])
-    const data = Buffer.from(bits.slice(y * bytesPerRow, (y + h) * bytesPerRow))
+    const data = Buffer.from(bm.bits.slice(y * bytesPerRow, (y + h) * bytesPerRow))
     buffers.push(header, data)
   }
 
   return buffers
+}
+
+function drawableToEscPos(source: Image | Canvas, srcWidth: number, srcHeight: number): Buffer[] {
+  return bitmapToEscPos(drawableToBitmap(source, srcWidth, srcHeight))
+}
+
+/**
+ * Stitch the job's dithered bitmaps vertically into a single monochrome PNG —
+ * a faithful "what was printed" preview for the print history.
+ */
+async function bitmapsToPreviewPng(bitmaps: Bitmap[]): Promise<Buffer | undefined> {
+  const totalHeight = bitmaps.reduce((sum, b) => sum + b.height, 0)
+  if (!totalHeight) return undefined
+  const width = Math.max(...bitmaps.map((b) => b.width))
+
+  const canvas = new Canvas(width, totalHeight)
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = 'white'
+  ctx.fillRect(0, 0, width, totalHeight)
+
+  let offsetY = 0
+  for (const bm of bitmaps) {
+    const img = ctx.createImageData(bm.width, bm.height)
+    const bytesPerRow = Math.ceil(bm.width / 8)
+    for (let y = 0; y < bm.height; y++) {
+      for (let x = 0; x < bm.width; x++) {
+        const bit = (bm.bits[y * bytesPerRow + (x >> 3)] >> (7 - (x & 7))) & 1
+        const di = (y * bm.width + x) * 4
+        const v = bit ? 0 : 255 // bit set = black dot
+        img.data[di] = img.data[di + 1] = img.data[di + 2] = v
+        img.data[di + 3] = 255
+      }
+    }
+    ctx.putImageData(img, 0, offsetY)
+    offsetY += bm.height
+  }
+  return await canvas.toBuffer('png')
 }
 
 async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
@@ -204,13 +252,14 @@ export function cropRasterToContent(page: RasterPage): RasterPage | null {
   return { width: cw, height: ch, rgba: out }
 }
 
-function rasterPageToEscPos(page: RasterPage): Buffer[] {
+/** Crop a raster page to its content and dither it; null for a blank page. */
+function rasterPageToBitmap(page: RasterPage): Bitmap | null {
   const cropped = cropRasterToContent(page)
-  if (!cropped) return [] // blank page — print nothing, waste no paper
+  if (!cropped) return null // blank page — print nothing, waste no paper
   const canvas = new Canvas(cropped.width, cropped.height)
   const ctx = canvas.getContext('2d')
   ctx.putImageData(new ImageData(cropped.rgba, cropped.width, cropped.height), 0, 0)
-  return drawableToEscPos(canvas, cropped.width, cropped.height)
+  return drawableToBitmap(canvas, cropped.width, cropped.height)
 }
 
 const DEFAULT_PORT = 9100
@@ -266,23 +315,51 @@ async function buildImagePayload(imageBuffer: Buffer, copies: number): Promise<B
   return assembleCopies(await imageToEscPos(imageBuffer), copies)
 }
 
-/** Build a payload from several images back-to-back (each cut), shared init. */
-export async function buildImagesPayload(imageBuffers: Buffer[], copies: number): Promise<Buffer> {
+/** An assembled ESC/POS payload plus a monochrome PNG preview of what it prints. */
+export interface PrintBuild {
+  payload: Buffer
+  preview?: Buffer
+}
+
+/** Build several images back-to-back (each cut), shared init, with a preview. */
+export async function buildImagesJob(imageBuffers: Buffer[], copies: number): Promise<PrintBuild> {
   const cut = cutBytes()
+  const bitmaps: Bitmap[] = []
   const chunks: Buffer[] = []
-  for (const buf of imageBuffers) chunks.push(...(await imageToEscPos(buf)), FEED, cut)
-  // Re-use assembleCopies for the shared INIT/CENTER, but the per-image feed/cut
-  // are already included, so pass the chunks as a single "copy" and repeat that.
+  for (const buf of imageBuffers) {
+    const img = await loadImage(buf)
+    const bm = drawableToBitmap(img, img.width, img.height)
+    bitmaps.push(bm)
+    chunks.push(...bitmapToEscPos(bm), FEED, cut)
+  }
+  // Re-use the shared INIT/CENTER, but the per-image feed/cut are already
+  // included, so repeat the chunk block once per copy.
   const parts: Buffer[] = [INIT, CENTER_ALIGN]
   for (let i = 0; i < copies; i++) parts.push(...chunks)
-  return Buffer.concat(parts)
+  return { payload: Buffer.concat(parts), preview: await bitmapsToPreviewPng(bitmaps) }
+}
+
+/** Build a payload from several images back-to-back (each cut), shared init. */
+export async function buildImagesPayload(imageBuffers: Buffer[], copies: number): Promise<Buffer> {
+  return (await buildImagesJob(imageBuffers, copies)).payload
+}
+
+/** Build decoded raster pages (from an IPP job) into a payload, with a preview. */
+export async function buildRasterJob(pages: RasterPage[], copies: number): Promise<PrintBuild> {
+  const bitmaps: Bitmap[] = []
+  const chunks: Buffer[] = []
+  for (const page of pages) {
+    const bm = rasterPageToBitmap(page)
+    if (!bm) continue // blank page — skip
+    bitmaps.push(bm)
+    chunks.push(...bitmapToEscPos(bm))
+  }
+  return { payload: assembleCopies(chunks, copies), preview: await bitmapsToPreviewPng(bitmaps) }
 }
 
 /** Build the ESC/POS payload for decoded raster pages (from an IPP job). */
 export async function buildRasterPayload(pages: RasterPage[], copies: number): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for (const page of pages) chunks.push(...rasterPageToEscPos(page))
-  return assembleCopies(chunks, copies)
+  return (await buildRasterJob(pages, copies)).payload
 }
 
 /**

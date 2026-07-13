@@ -164,6 +164,35 @@ describe('cropRasterToContent', () => {
 	})
 })
 
+describe('job preview', () => {
+	const isPng = (b?: Buffer) => !!b && b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47
+
+	function rasterWithBox(width: number, height: number, box: { x: number; y: number; w: number; h: number }): Uint8ClampedArray {
+		const rgba = new Uint8ClampedArray(width * height * 4).fill(255)
+		for (let y = box.y; y < box.y + box.h; y++) {
+			for (let x = box.x; x < box.x + box.w; x++) {
+				const i = (y * width + x) * 4
+				rgba[i] = rgba[i + 1] = rgba[i + 2] = 0
+			}
+		}
+		return rgba
+	}
+
+	it('buildRasterJob returns a PNG preview for a page with content', async () => {
+		config.setConfig({ paperWidthDots: 576 })
+		const rgba = rasterWithBox(300, 400, { x: 50, y: 50, w: 200, h: 200 })
+		const { payload, preview } = await printer.buildRasterJob([{ width: 300, height: 400, rgba }], 1)
+		expect(payload.length).toBeGreaterThan(0)
+		expect(isPng(preview)).toBe(true)
+	})
+
+	it('buildRasterJob yields no preview for a fully blank page', async () => {
+		const rgba = new Uint8ClampedArray(300 * 400 * 4).fill(255)
+		const { preview } = await printer.buildRasterJob([{ width: 300, height: 400, rgba }], 1)
+		expect(preview).toBeUndefined()
+	})
+})
+
 describe('cut mode + cash drawer', () => {
 	const FULL = Buffer.from([0x1b, 0x69])
 	const PARTIAL = Buffer.from([0x1b, 0x6d])

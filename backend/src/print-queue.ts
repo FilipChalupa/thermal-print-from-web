@@ -22,6 +22,8 @@ export interface PrintMeta {
 	format?: JobFormat
 	/** Raw-print port of the target printer (default 9100). */
 	port?: number
+	/** Monochrome PNG preview of what this job prints, for the history view. */
+	preview?: Buffer
 }
 
 export type QueueState = 'queued' | 'printing' | 'waiting'
@@ -88,14 +90,14 @@ async function drain(key: string): Promise<void> {
 		const q = queues.get(key)
 		while (q && q.length) {
 			const item = q[0]
-			const { source, name, pages, copies, format } = item.meta
+			const { source, name, pages, copies, format, preview } = item.meta
 			try {
 				await deliver(item)
-				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'ok' }, item.payload)
+				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'ok' }, item.payload, preview)
 				item.resolve()
 			} catch (err) {
 				const error = err instanceof Error ? err.message : 'Chyba tisku'
-				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'error', error }, item.payload)
+				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'error', error }, item.payload, preview)
 				notifyFailure(item.ip, name, error)
 				item.reject(err instanceof Error ? err : new Error(error))
 			}

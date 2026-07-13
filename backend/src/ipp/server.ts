@@ -10,7 +10,7 @@ import type { AdvertisedPrinter } from '../config.js'
 import { logJob } from '../jobs-log.js'
 import { enqueuePrint } from '../print-queue.js'
 import { getPrinterStatus } from '../printer-status.js'
-import { buildRasterPayload } from '../printer.js'
+import { buildRasterJob } from '../printer.js'
 import { attr, decode, encode, findAttr, GroupTag, ValueTag } from './encoding.js'
 import type { IppAttribute, IppGroup, IppMessage } from './encoding.js'
 import { renderPdfToPages } from './pdf.js'
@@ -255,8 +255,8 @@ async function processJob(job: Job): Promise<void> {
 		// The OS sends either raster (PWG/URF) or PDF; sniff the magic bytes.
 		const isPdf = job.document.subarray(0, 5).toString('latin1') === '%PDF-'
 		const pages = isPdf ? await renderPdfToPages(job.document, getConfig().paperWidthDots) : decodeRaster(job.document)
-		const payload = await buildRasterPayload(pages, job.copies)
-		// The queue serializes + retries + logs the job (with payload for reprint).
+		const { payload, preview } = await buildRasterJob(pages, job.copies)
+		// The queue serializes + retries + logs the job (with payload for reprint + preview).
 		await enqueuePrint(ip, payload, {
 			source: 'ipp',
 			name: job.name,
@@ -264,6 +264,7 @@ async function processJob(job: Job): Promise<void> {
 			copies: job.copies,
 			format: isPdf ? 'pdf' : 'raster',
 			port: job.target.targetPort,
+			preview,
 		})
 		job.state = 9 // completed
 	} catch {

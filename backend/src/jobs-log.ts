@@ -28,6 +28,7 @@ export interface JobLogEntry {
 const MAX_ENTRIES = 50
 const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024 // don't retain a single huge job for reprint
 const MAX_PAYLOAD_TOTAL_BYTES = 16 * 1024 * 1024 // total budget for retained payloads
+const MAX_PREVIEW_TOTAL_BYTES = 24 * 1024 * 1024 // total budget for retained previews (PNG)
 
 const configPath = process.env.THERMAL_CONFIG_PATH
 const JOBS_PATH =
@@ -36,7 +37,9 @@ const JOBS_PATH =
 
 const entries: JobLogEntry[] = []
 const payloads = new Map<number, Buffer>()
+const previews = new Map<number, Buffer>()
 let payloadTotal = 0
+let previewTotal = 0
 let nextId = 1
 
 let persist = false
@@ -101,7 +104,15 @@ function dropPayload(id: number): void {
 	}
 }
 
-export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer): number {
+function dropPreview(id: number): void {
+	const buf = previews.get(id)
+	if (buf) {
+		previewTotal -= buf.length
+		previews.delete(id)
+	}
+}
+
+export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer, preview?: Buffer): number {
 	const id = nextId++
 	entries.unshift({ ...entry, id, at: Date.now() })
 
@@ -114,9 +125,21 @@ export function logJob(entry: Omit<JobLogEntry, 'id' | 'at'>, payload?: Buffer):
 		}
 	}
 
-	// Cap the number of log entries; drop payloads of evicted entries.
+	// Retain a preview image (to show in the history), within its own budget.
+	if (preview && preview.length) {
+		previews.set(id, preview)
+		previewTotal += preview.length
+		while (previewTotal > MAX_PREVIEW_TOTAL_BYTES && previews.size > 1) {
+			dropPreview(Math.min(...previews.keys()))
+		}
+	}
+
+	// Cap the number of log entries; drop retained blobs of evicted entries.
 	if (entries.length > MAX_ENTRIES) {
-		for (const removed of entries.splice(MAX_ENTRIES)) dropPayload(removed.id)
+		for (const removed of entries.splice(MAX_ENTRIES)) {
+			dropPayload(removed.id)
+			dropPreview(removed.id)
+		}
 	}
 
 	scheduleSave()
@@ -139,4 +162,14 @@ export function hasPayload(id: number): boolean {
 /** The assembled ESC/POS payload of a successful job, for re-printing. */
 export function getJobPayload(id: number): Buffer | undefined {
 	return payloads.get(id)
+}
+
+/** Whether a job still has a retained preview image. */
+export function hasPreview(id: number): boolean {
+	return previews.has(id)
+}
+
+/** The monochrome PNG preview of what a job printed, if still retained. */
+export function getJobPreview(id: number): Buffer | undefined {
+	return previews.get(id)
 }

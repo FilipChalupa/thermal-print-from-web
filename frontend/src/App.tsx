@@ -62,6 +62,7 @@ interface JobLogEntry {
   status: 'ok' | 'error'
   error?: string
   reprintable?: boolean
+  hasPreview?: boolean
 }
 
 const FORMAT_LABELS: Record<NonNullable<JobLogEntry['format']>, string> = {
@@ -136,6 +137,7 @@ export default function App() {
   const [contrast, setContrast] = useState(0)
   const [cutMode, setCutMode] = useState<CutMode>('full')
   const [jobs, setJobs] = useState<JobLogEntry[]>([])
+  const [previewId, setPreviewId] = useState<number | null>(null)
   const [queue, setQueue] = useState<QueueJob[]>([])
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
@@ -746,6 +748,17 @@ export default function App() {
                   <span className="job-status" aria-hidden>
                     {j.status === 'ok' ? '✓' : '✕'}
                   </span>
+                  {j.hasPreview && (
+                    <button
+                      type="button"
+                      className="job-thumb"
+                      onClick={() => setPreviewId(j.id)}
+                      title="Zobrazit náhled tisku"
+                      aria-label="Zobrazit náhled tisku"
+                    >
+                      <img src={`${BACKEND_URL}/jobs/${j.id}/preview`} alt="" loading="lazy" />
+                    </button>
+                  )}
                   <span className="job-main">
                     <span className="job-name">
                       <span className="job-source">{jobSourceLabel(j.source)}</span> {j.name}
@@ -768,6 +781,20 @@ export default function App() {
               ))}
             </ul>
           </section>
+        )}
+
+        {previewId !== null && (
+          <div className="preview-overlay" role="dialog" aria-modal="true" onClick={() => setPreviewId(null)}>
+            <img
+              className="preview-full"
+              src={`${BACKEND_URL}/jobs/${previewId}/preview`}
+              alt="Náhled tisku"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button type="button" className="preview-close" onClick={() => setPreviewId(null)} aria-label="Zavřít">
+              ✕
+            </button>
+          </div>
         )}
       </main>
     </>

@@ -20,7 +20,7 @@ import {
   updatePrinter,
 } from './config.js'
 import { discoverPrinters, discoverPrintersStream, pickDefaultPrinter } from './discovery.js'
-import { flushJobs, getJobEntry, getJobLog, getJobPayload, hasPayload, loadJobs } from './jobs-log.js'
+import { flushJobs, getJobEntry, getJobLog, getJobPayload, getJobPreview, hasPayload, hasPreview, loadJobs } from './jobs-log.js'
 import { log } from './log.js'
 import { enqueuePrint, getQueueJobs } from './print-queue.js'
 import { getPrinterStatus, refreshPrinterStatus, startPrinterMonitor } from './printer-status.js'
@@ -28,7 +28,7 @@ import { startIppHttpServer } from './ipp/http.js'
 import type { IppHttpHandle } from './ipp/http.js'
 import { startMdns } from './ipp/mdns.js'
 import type { MdnsHandle } from './ipp/mdns.js'
-import { buildImagesPayload, buildTestPayload, openCashDrawer } from './printer.js'
+import { buildImagesJob, buildTestPayload, openCashDrawer } from './printer.js'
 import type { Context, Next } from 'hono'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -156,10 +156,10 @@ app.post('/print', rateLimit, async (c) => {
       for (const image of imageFiles) {
         if (image instanceof File) buffers.push(Buffer.from(await image.arrayBuffer()))
       }
-      const payload = await buildImagesPayload(buffers, copies)
+      const { payload, preview } = await buildImagesJob(buffers, copies)
       // The queue serializes with other jobs, retries if the printer is briefly
-      // offline, and logs the job (with payload for reprint).
-      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image', port })
+      // offline, and logs the job (with payload for reprint + preview image).
+      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image', port, preview })
       await s.write(JSON.stringify({ type: 'done' }) + '\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Chyba při tisku'
@@ -271,7 +271,17 @@ app.get('/discover/stream', (c) =>
 
 // Recent print jobs across all channels (IPP / web / test). `reprintable` is
 // false for jobs whose payload is no longer retained (e.g. loaded after restart).
-app.get('/jobs', (c) => c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id) })) }))
+app.get('/jobs', (c) =>
+  c.json({ jobs: getJobLog().map((j) => ({ ...j, reprintable: hasPayload(j.id), hasPreview: hasPreview(j.id) })) }),
+)
+
+// Monochrome PNG preview of what a job printed (retained in memory, best-effort).
+app.get('/jobs/:id/preview', (c) => {
+  const preview = getJobPreview(Number(c.req.param('id')))
+  if (!preview) return c.json({ error: 'Náhled není k dispozici' }, 404)
+  const ab = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer
+  return c.body(ab, 200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' })
+})
 
 // Jobs currently printing / queued / waiting for the printer to come back.
 app.get('/queue', (c) => c.json({ queue: getQueueJobs() }))
@@ -291,6 +301,7 @@ app.post('/jobs/:id/reprint', rateLimit, async (c) => {
       copies: entry.copies,
       format: entry.format,
       port,
+      preview: getJobPreview(id), // carry the original's preview to the reprint
     })
     return c.json({ ok: true })
   } catch (err) {
