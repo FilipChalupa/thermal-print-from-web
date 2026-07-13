@@ -139,7 +139,32 @@ Na hostiteli povol na LAN příchozí provoz:
 - **UDP 5353** (mDNS/Bonjour discovery)
 - **TCP `IPP_PORT`** (výchozí 6310, IPP)
 
-Web port (`PORT`, výchozí 3000) řeší Coolify proxy pro doménu jako obvykle.
+#### Routing domény při host networking (důležité)
+
+Coolify pole **Domains** u služby v `network_mode: host` **nefunguje** — automatické routování přes Traefik labely potřebuje kontejner na interní `coolify` síti, jenže host-networking kontejner na ní není (poslouchá přímo na hostiteli `:3000`). Výsledkem je, že doména spadne na Traefik výchozí `404 page not found`.
+
+Řešení — **nech pole Domains prázdné** a přidej Traefik **dynamickou konfiguraci** (v Coolify: _Server → Proxy → Dynamic Configurations_), která doménu nasměruje na hostitele přes `host.docker.internal`:
+
+```yaml
+http:
+  routers:
+    thermal-print:
+      rule: "Host(`print.tvuj-podnik.cz`)"
+      entryPoints:
+        - http          # viz poznámka o dvouvrstvém Traefiku níže
+      service: thermal-print
+      # tls:            # jen když TLS řeší tenhle (jediný) Traefik:
+      #   certResolver: letsencrypt
+  services:
+    thermal-print:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3000"   # PORT z compose
+```
+
+Ověř, že Coolify Traefik zná host gateway: `docker exec coolify-proxy getent hosts host.docker.internal` (vrátí IP). Když ne, dosaď v `url` přímo IP docker mostu (`docker exec coolify-proxy ip route | grep default`, typicky `172.17.0.1`).
+
+> **Dvouvrstvý Traefik:** pokud před Coolify Traefikem běží ještě jeden (edge) Traefik, který **terminuje TLS** a přeposílá dovnitř přes HTTP, nedávej do vnitřního routeru žádný `redirectScheme: https` middleware ani `tls` — vnitřní Traefik dostává provoz jako HTTP a redirect na https by se zacyklil (`307` donekonečna). TLS + certifikát řeš na vnějším Traefiku.
 
 > **Pozor na `avahi-daemon`:** pokud na hostiteli běží (typicky desktopové Linuxy), drží UDP 5353 a mDNS advertising může kolidovat. Na serveru většinou neběží; pokud ano, buď ho vypni, nebo počítej s možnou kolizí (hlídej logy `mDNS advertising error`).
 
