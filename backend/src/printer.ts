@@ -153,11 +153,64 @@ async function imageToEscPos(imageBuffer: Buffer): Promise<Buffer[]> {
   return drawableToEscPos(img, img.width, img.height)
 }
 
+/**
+ * The OS rasterises a system-print job onto a fixed-size page (e.g. A4-tall),
+ * so a small image arrives centred in a sea of blank margins. On a continuous
+ * thermal roll that empty space is just wasted paper — and, scaled to width,
+ * shrinks the actual content. Crop to the content's bounding box so we feed
+ * only the paper the content needs and it fills the roll width.
+ * Returns null when the page is entirely blank (nothing to print).
+ */
+export function cropRasterToContent(page: RasterPage): RasterPage | null {
+  const { width, height, rgba } = page
+  // A pixel is "ink" when it is visibly darker than the (white) paper.
+  const isInk = (x: number, y: number): boolean => {
+    const i = (y * width + x) * 4
+    const luma = rgba[i] * 0.299 + rgba[i + 1] * 0.587 + rgba[i + 2] * 0.114
+    return luma < 250
+  }
+
+  let top = -1
+  let bottom = -1
+  let left = width
+  let right = -1
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!isInk(x, y)) continue
+      if (top === -1) top = y
+      bottom = y
+      if (x < left) left = x
+      if (x > right) right = x
+    }
+  }
+  if (top === -1) return null // fully blank page
+
+  // Leave a little breathing room so content isn't shaved to the edge.
+  const pad = 8
+  top = Math.max(0, top - pad)
+  bottom = Math.min(height - 1, bottom + pad)
+  left = Math.max(0, left - pad)
+  right = Math.min(width - 1, right + pad)
+
+  const cw = right - left + 1
+  const ch = bottom - top + 1
+  if (cw === width && ch === height) return page // already tight
+
+  const out = new Uint8ClampedArray(cw * ch * 4)
+  for (let y = 0; y < ch; y++) {
+    const srcStart = ((top + y) * width + left) * 4
+    out.set(rgba.subarray(srcStart, srcStart + cw * 4), y * cw * 4)
+  }
+  return { width: cw, height: ch, rgba: out }
+}
+
 function rasterPageToEscPos(page: RasterPage): Buffer[] {
-  const canvas = new Canvas(page.width, page.height)
+  const cropped = cropRasterToContent(page)
+  if (!cropped) return [] // blank page — print nothing, waste no paper
+  const canvas = new Canvas(cropped.width, cropped.height)
   const ctx = canvas.getContext('2d')
-  ctx.putImageData(new ImageData(page.rgba, page.width, page.height), 0, 0)
-  return drawableToEscPos(canvas, page.width, page.height)
+  ctx.putImageData(new ImageData(cropped.rgba, cropped.width, cropped.height), 0, 0)
+  return drawableToEscPos(canvas, cropped.width, cropped.height)
 }
 
 const DEFAULT_PORT = 9100

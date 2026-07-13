@@ -92,12 +92,75 @@ describe('printImage / printRasterPages', () => {
 		expect(buf[gsIdx + 4]).toBe(48)
 	})
 
+	// A raster page with a black rectangle drawn into the given content box.
+	function rasterWithBox(width: number, height: number, box: { x: number; y: number; w: number; h: number }): Uint8ClampedArray {
+		const rgba = new Uint8ClampedArray(width * height * 4).fill(255)
+		for (let y = box.y; y < box.y + box.h; y++) {
+			for (let x = box.x; x < box.x + box.w; x++) {
+				const i = (y * width + x) * 4
+				rgba[i] = rgba[i + 1] = rgba[i + 2] = 0
+				rgba[i + 3] = 255
+			}
+		}
+		return rgba
+	}
+
 	it('prints raster pages', async () => {
 		config.setConfig({ paperWidthDots: 576 })
-		const rgba = new Uint8ClampedArray(120 * 40 * 4).fill(255)
+		const rgba = rasterWithBox(120, 40, { x: 10, y: 5, w: 100, h: 30 })
 		const buf = await capture(() => printer.printRasterPages('127.0.0.1', [{ width: 120, height: 40, rgba }], 1))
 		expect(buf.includes(Buffer.from([0x1d, 0x76, 0x30]))).toBe(true)
 		expect(countCuts(buf)).toBe(1)
+	})
+
+	it('skips a fully blank raster page (no raster, no wasted paper)', async () => {
+		config.setConfig({ paperWidthDots: 576 })
+		const rgba = new Uint8ClampedArray(120 * 40 * 4).fill(255)
+		const buf = await capture(() => printer.printRasterPages('127.0.0.1', [{ width: 120, height: 40, rgba }], 1))
+		expect(buf.includes(Buffer.from([0x1d, 0x76, 0x30]))).toBe(false)
+	})
+})
+
+describe('cropRasterToContent', () => {
+	function rasterWithBox(width: number, height: number, box: { x: number; y: number; w: number; h: number }): Uint8ClampedArray {
+		const rgba = new Uint8ClampedArray(width * height * 4).fill(255)
+		for (let y = box.y; y < box.y + box.h; y++) {
+			for (let x = box.x; x < box.x + box.w; x++) {
+				const i = (y * width + x) * 4
+				rgba[i] = rgba[i + 1] = rgba[i + 2] = 0
+			}
+		}
+		return rgba
+	}
+
+	it('crops away blank margins (with an 8px padding) around the content', () => {
+		// 400×2000 page, content is a 40×40 box far from the edges.
+		const rgba = rasterWithBox(400, 2000, { x: 100, y: 900, w: 40, h: 40 })
+		const cropped = printer.cropRasterToContent({ width: 400, height: 2000, rgba })
+		expect(cropped).not.toBeNull()
+		// 40px content + 8px padding on each side = 56.
+		expect(cropped?.width).toBe(56)
+		expect(cropped?.height).toBe(56)
+	})
+
+	it('returns null for a fully blank page', () => {
+		const rgba = new Uint8ClampedArray(50 * 50 * 4).fill(255)
+		expect(printer.cropRasterToContent({ width: 50, height: 50, rgba })).toBeNull()
+	})
+
+	it('leaves an already-tight page unchanged', () => {
+		const rgba = rasterWithBox(30, 30, { x: 0, y: 0, w: 30, h: 30 })
+		const page = { width: 30, height: 30, rgba }
+		expect(printer.cropRasterToContent(page)).toBe(page)
+	})
+
+	it('clamps padding at the page edges', () => {
+		// Content touches the top-left corner; padding can't go negative.
+		const rgba = rasterWithBox(200, 200, { x: 0, y: 0, w: 10, h: 10 })
+		const cropped = printer.cropRasterToContent({ width: 200, height: 200, rgba })
+		// 10px content + 8px padding on the far side only (near side clamped at 0) = 18.
+		expect(cropped?.width).toBe(18)
+		expect(cropped?.height).toBe(18)
 	})
 })
 
