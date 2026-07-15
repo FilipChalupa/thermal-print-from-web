@@ -1,172 +1,172 @@
 # kilomayo-print
 
-Webová aplikace pro tisk obrázků na termální tiskárně Epson přes ESC/POS protokol.
+Web application for printing images on Epson thermal printers over the ESC/POS protocol.
 
 ## Stack
 
 - **Frontend:** React + Vite (TypeScript)
 - **Backend:** Hono (Node.js, TypeScript)
-- **Tisk:** ESC/POS přes TCP, Floyd-Steinberg dithering pomocí skia-canvas
+- **Printing:** ESC/POS over TCP, Floyd–Steinberg dithering via skia-canvas
 
-## Funkce
+## Features
 
-- **Web tisk obrázků** — nahrání/drag&drop/clipboard, náhled, rotace a řazení, počet výtisků, po každém automatický cut
-- **Síťová tiskárna bez ovladačů** (AirPrint / IPP Everywhere) — tisk z libovolné aplikace přes `Cmd/Ctrl+P` (viz níže)
-- **Auto-discovery** tiskáren v síti (mDNS + sken portu 9100) s našeptáváním a ověřením, že jde o ESC/POS tiskárnu
-- **Testovací lístek** na jednu nebo všechny nalezené tiskárny
-- **Šířka papíru** 80 mm (576 bodů) / 58 mm (384 bodů)
-- **Úpravy obrazu** — dithering (Floyd–Steinberg / Atkinson / Ordered / práh) + jas a kontrast
-- **Fronta tisku** — serializace na tiskárnu a opakování, když je krátce offline (s živým náhledem miniatury)
-- **Stav tiskárny** — online / offline / došel papír / otevřené víko (přes ESC/POS `DLE EOT`), promítnuto i do IPP
-- **Historie úloh** — náhled vytištěného obrázku (miniatura → zvětšení → stažení PNG) a přetisk
-- **Bez plýtvání rolí** — u systémového tisku se obsah automaticky ořízne na jeho ohraničení (žádné prázdné metry papíru) a role se ohlašuje jako médium s proměnnou délkou
-- **Více síťových tiskáren** — každá jako samostatná AirPrint fronta mířící na jinou fyzickou tiskárnu
+- **Web image printing** — upload/drag & drop/clipboard, preview, rotation and reordering, copy count, automatic cut after each print
+- **Driverless network printer** (AirPrint / IPP Everywhere) — print from any application via `Cmd/Ctrl+P` (see below)
+- **Auto-discovery** of printers on the network (mDNS + port 9100 scan) with suggestions and verification that the device really is an ESC/POS printer
+- **Test receipt** to a single printer or all discovered printers
+- **Paper width** 80 mm (576 dots) / 58 mm (384 dots)
+- **Image adjustments** — dithering (Floyd–Steinberg / Atkinson / Ordered / threshold) + brightness and contrast
+- **Print queue** — serialization per printer and retries when the printer is briefly offline (with a live thumbnail preview)
+- **Printer status** — online / offline / out of paper / cover open (via ESC/POS `DLE EOT`), also reflected in IPP
+- **Job history** — preview of the printed image (thumbnail → zoom → PNG download) and reprint
+- **No wasted paper** — for system printing the content is automatically cropped to its bounding box (no meters of blank paper) and the roll is advertised as variable-length media
+- **Multiple network printers** — each one is a separate AirPrint queue targeting a different physical printer
 
-## Síťová tiskárna bez ovladačů (AirPrint / IPP Everywhere)
+## Driverless network printer (AirPrint / IPP Everywhere)
 
-Kromě webu se aplikace v lokální síti tváří jako **běžná tiskárna**, takže jde tisknout z jakékoli aplikace přes `Cmd/Ctrl+P` — bez instalace ovladače na Windows, macOS i Linuxu.
+Besides the web UI, the application presents itself on the local network as a **regular printer**, so you can print from any application via `Cmd/Ctrl+P` — no driver installation on Windows, macOS or Linux.
 
-Jak to funguje:
+How it works:
 
-- Server se ohlašuje přes **mDNS/Bonjour** (`_ipp._tcp`, včetně AirPrint subtypu `_universal`), takže ho OS sám najde a nabídne přidání.
-- Implementuje **IPP** server (RFC 8011 + IPP Everywhere): `Get-Printer-Attributes`, `Validate-Job`, `Print-Job`, `Create-Job`/`Send-Document`, `Get-Jobs`, `Cancel-Job`.
-- OS pošle stránku jako **PWG Raster** (`image/pwg-raster`) nebo **Apple Raster / URF** (`image/urf`). Ta se dekóduje, **ořízne na obsah** (OS ji vysází na pevnou stránku, tj. spousta bílého okraje — na kontinuální roli by to bylo plýtvání), přeškáluje na šířku tiskárny (576 dotů / 80 mm role, 203 dpi), Floyd–Steinberg dither a odešle jako ESC/POS. Role se navíc hlásí jako médium s **proměnnou délkou** (rozsah), aby klient stránku ideálně vysázel rovnou na výšku obsahu.
+- The server announces itself via **mDNS/Bonjour** (`_ipp._tcp`, including the AirPrint subtype `_universal`), so the OS finds it on its own and offers to add it.
+- It implements an **IPP** server (RFC 8011 + IPP Everywhere): `Get-Printer-Attributes`, `Validate-Job`, `Print-Job`, `Create-Job`/`Send-Document`, `Get-Jobs`, `Cancel-Job`.
+- The OS sends the page as **PWG Raster** (`image/pwg-raster`) or **Apple Raster / URF** (`image/urf`). It is decoded, **cropped to its content** (the OS lays it out on a fixed page, i.e. lots of white margin — a waste on a continuous roll), rescaled to the printer width (576 dots / 80 mm roll, 203 dpi), Floyd–Steinberg dithered and sent as ESC/POS. The roll is additionally advertised as **variable-length** media (a range), so the client ideally lays the page out at the height of the content right away.
 
-- OS pošle stránku i jako **PDF** (`application/pdf`) — vyrenderuje se přes MuPDF.
+- The OS can also send the page as **PDF** (`application/pdf`) — rendered via MuPDF.
 
-### Tiskárny a hvězdička
+### Printers and the star
 
-Ve webu spravuješ **jeden seznam tiskáren** — každá je pojmenovaná, má svou IP a v síti se ohlašuje jako **samostatná AirPrint / IPP Everywhere tiskárna** (na cestě `ipp/print/<id>`). Tiskárny se **automaticky napovídají** z discovery (mDNS `_pdl-datastream._tcp` + sken portu 9100 po lokálním /24; rozsah lze přebít přes `THERMAL_DISCOVERY_HOSTS`) — stačí kliknout „přidat", nebo zadat IP ručně.
+In the web UI you manage **a single list of printers** — each one has a name, its own IP, and announces itself on the network as a **standalone AirPrint / IPP Everywhere printer** (at the path `ipp/print/<id>`). Printers are **suggested automatically** from discovery (mDNS `_pdl-datastream._tcp` + a port 9100 scan of the local /24; the range can be overridden via `THERMAL_DISCOVERY_HOSTS`) — just click "add", or enter the IP manually.
 
-- **Hvězdička ★ = výchozí tiskárna.** Ta dostane kanonickou cestu `ipp/print` a je cílem i webového tlačítka *Tisknout*. Při prvním spuštění se první nalezená přidá a označí jako výchozí automaticky (zero-config).
-- Ostatní tiskárny v seznamu fungují jako další AirPrint fronty, každá na svou fyzickou IP.
+- **Star ★ = default printer.** It gets the canonical path `ipp/print` and is also the target of the web *Print* button. On first start, the first discovered printer is added and marked as default automatically (zero-config).
+- The other printers in the list work as additional AirPrint queues, each pointing to its own physical IP.
 
-Konfigurace se ukládá do `~/.thermal-print-config.json` (přebitelné přes `THERMAL_CONFIG_PATH`); starší formát (jedna `printerIp` + `virtualPrinters`) se při načtení automaticky převede na nový seznam.
+Configuration is stored in `~/.thermal-print-config.json` (overridable via `THERMAL_CONFIG_PATH`); the legacy format (a single `printerIp` + `virtualPrinters`) is automatically migrated to the new list on load.
 
-### Proměnné prostředí
+### Environment variables
 
-| Proměnná | Význam |
+| Variable | Meaning |
 | --- | --- |
-| `PORT` | Port webového UI / REST (výchozí `3000`) |
-| `IPP_PORT` | Port IPP serveru (výchozí `6310`; ohlašuje se přes mDNS, na hodnotě nezáleží) |
-| `PRINTER_IP`, `PRINTER_NAME` | Výchozí cílová IP a jméno hlavní tiskárny v síti |
-| `PAPER_WIDTH_DOTS` | Výchozí šířka tisku: `576` (80 mm) nebo `384` (58 mm) |
-| `THERMAL_CONFIG_PATH` | Cesta ke konfiguračnímu souboru |
-| `THERMAL_JOBS_PATH` | Cesta k souboru s historií úloh (výchozí vedle configu) |
-| `THERMAL_DISCOVERY_HOSTS` | Ruční seznam IP pro sken (místo autodetekce podsítě) |
-| `WEBHOOK_URL` | Když je nastaveno, při selhání tisku se sem POSTne upozornění |
-| `PRINT_QUEUE_MAX_WAIT_MS`, `PRINT_QUEUE_RETRY_GAP_MS` | Okno opakování fronty pro offline tiskárnu |
-| `LOG_LEVEL` | Úroveň logování: `debug` / `info` (výchozí) / `warn` / `error` |
+| `PORT` | Web UI / REST port (default `3000`) |
+| `IPP_PORT` | IPP server port (default `6310`; announced via mDNS, the value doesn't matter) |
+| `PRINTER_IP`, `PRINTER_NAME` | Default target IP and name of the main network printer |
+| `PAPER_WIDTH_DOTS` | Default print width: `576` (80 mm) or `384` (58 mm) |
+| `THERMAL_CONFIG_PATH` | Path to the configuration file |
+| `THERMAL_JOBS_PATH` | Path to the job history file (defaults to next to the config) |
+| `THERMAL_DISCOVERY_HOSTS` | Manual list of IPs to scan (instead of subnet autodetection) |
+| `WEBHOOK_URL` | When set, a notification is POSTed here on print failure |
+| `PRINT_QUEUE_MAX_WAIT_MS`, `PRINT_QUEUE_RETRY_GAP_MS` | Queue retry window for an offline printer |
+| `LOG_LEVEL` | Log level: `debug` / `info` (default) / `warn` / `error` |
 
-Stav a diagnostika je na `GET /health` (běží IPP/mDNS, dostupnost a stav tiskárny, počty úloh, seznam ohlašovaných tiskáren).
+Status and diagnostics are available at `GET /health` (IPP/mDNS running, printer reachability and status, job counts, list of announced printers).
 
-> Při prvním spuštění může Windows/macOS firewall vyžádat povolení příchozích spojení (IPP port + mDNS). IPP server naslouchá na `0.0.0.0`, samotné webové UI zůstává jen na loopbacku.
+> On first start, the Windows/macOS firewall may ask to allow incoming connections (IPP port + mDNS). The IPP server listens on `0.0.0.0`, while the web UI itself stays on loopback only.
 
-## Požadavky
+## Requirements
 
 - Node.js 22+
-- Epson termální tiskárna dostupná na síti (port 9100)
+- Epson thermal printer reachable on the network (port 9100)
 
-## Vývoj
+## Development
 
 ```bash
-npm ci          # nainstaluje devDependencies (concurrently)
-npm run dev          # spustí backend (port 3000) + frontend (port 5173)
+npm ci          # installs devDependencies (concurrently)
+npm run dev          # starts the backend (port 3000) + frontend (port 5173)
 ```
 
-## Testy
+## Tests
 
-Backend má sadu testů (vitest) pokrývající IPP kodek, PWG/URF dekodér, PDF rendering, dithering, frontu tisku, přetisk, IPP atributy/stav a discovery:
+The backend has a test suite (vitest) covering the IPP codec, PWG/URF decoder, PDF rendering, dithering, the print queue, reprint, IPP attributes/status and discovery:
 
 ```bash
 npm test --prefix backend
 ```
 
-## Desktopová aplikace (Electron)
+## Desktop application (Electron)
 
-Stejný backend i frontend zabalené do okna pro Windows/macOS. Server uvnitř aplikace poslouchá pouze na `127.0.0.1` s náhodným volným portem — zvenku není dostupný a nekoliduje s ničím na portu 3000. Desktopová appka se navíc **neohlašuje jako síťová tiskárna** (IPP/mDNS je vypnuté) — je to lokální UI; driverless tiskárnu provozuj přes server (viz Deploy).
+The same backend and frontend packaged into a window for Windows/macOS. The server inside the app listens only on `127.0.0.1` with a random free port — it is not reachable from the outside and doesn't collide with anything on port 3000. The desktop app also **does not announce itself as a network printer** (IPP/mDNS is disabled) — it is a local UI; run the driverless printer via the server (see Deploy).
 
 ```bash
 npm --prefix desktop install
-npm run desktop          # build + spuštění okna (vývoj)
-npm run desktop:dist     # build instalátoru (.dmg / .exe) přes electron-builder
+npm run desktop          # build + open the window (development)
+npm run desktop:dist     # build the installer (.dmg / .exe) via electron-builder
 ```
 
-Instalátor pro danou platformu je potřeba buildit na ní (macOS `.dmg` na Macu, Windows `.exe` na Windows) — nebo nechat na GitHub Actions, viz níže.
+The installer for a given platform has to be built on it (macOS `.dmg` on a Mac, Windows `.exe` on Windows) — or leave it to GitHub Actions, see below.
 
 ### Release
 
-Nová verze ke stažení se vydává přes git tag:
+A new downloadable version is released via a git tag:
 
 ```bash
-npm version patch   # nebo minor / major — bumpne verzi, commitne a vytvoří tag vX.Y.Z
+npm version patch   # or minor / major — bumps the version, commits and creates the vX.Y.Z tag
 git push --follow-tags
 ```
 
-Push tagu `v*` spustí workflow [release.yml](.github/workflows/release.yml), které na macOS a Windows runnerech buildne instalátory a vytvoří GitHub release s `.dmg` (Apple Silicon) a `.exe` ke stažení. Verze v `desktop/package.json` se při `npm version` synchronizuje automaticky.
+Pushing a `v*` tag triggers the [release.yml](.github/workflows/release.yml) workflow, which builds the installers on macOS and Windows runners and creates a GitHub release with a downloadable `.dmg` (Apple Silicon) and `.exe`. The version in `desktop/package.json` is synchronized automatically during `npm version`.
 
-Instalátory nejsou podepsané vývojářským certifikátem.
+The installers are not signed with a developer certificate.
 
-Na macOS je proto doporučená instalace přes [install-mac.sh](install-mac.sh) — curl nepřidává quarantine atribut, takže Gatekeeper nic neblokuje:
+On macOS the recommended installation is therefore via [install-mac.sh](install-mac.sh) — curl doesn't add the quarantine attribute, so Gatekeeper doesn't block anything:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FilipChalupa/thermal-print-from-web/main/install-mac.sh | bash
 ```
 
-Ručně stažený `.dmg` macOS odmítne otevřít („is damaged“), dokud se quarantine neodstraní: `xattr -cr "/Applications/Thermal Print.app"`.
+A manually downloaded `.dmg` will be refused by macOS ("is damaged") until the quarantine is removed: `xattr -cr "/Applications/Thermal Print.app"`.
 
-Windows zobrazí SmartScreen varování (More info → Run anyway). Plné odstranění obou varování vyžaduje Apple Developer účet (podpis + notarizace) resp. Windows code signing certifikát.
+Windows shows a SmartScreen warning (More info → Run anyway). Fully removing both warnings requires an Apple Developer account (signing + notarization) or a Windows code signing certificate, respectively.
 
 ## Deploy (Coolify)
 
-Repozitář obsahuje samostatné `Dockerfile` pro backend i frontend.
+The repository contains a standalone `Dockerfile` for both the backend and the frontend.
 
-Při deployi přes Coolify nastav u každého resource **Base Directory** na `/backend` resp. `/frontend`.
+When deploying via Coolify, set the **Base Directory** of each resource to `/backend` and `/frontend` respectively.
 
-Frontend očekává URL backendu v environment variable:
+The frontend expects the backend URL in an environment variable:
 
 ```
-VITE_BACKEND_URL=https://tvuj-backend.domena.cz
+VITE_BACKEND_URL=https://your-backend.example.com
 ```
 
-### Deploy včetně síťové tiskárny (driverless tisk)
+### Deploy including the network printer (driverless printing)
 
-Web (HTTP) funguje odkudkoli, ale **driverless tisk (AirPrint / IPP Everywhere) funguje jen z hostitele na stejné LAN** jako tiskárna a zařízení, ze kterých tiskneš — mDNS discovery jede přes UDP multicast, který neprojde přes internet ani mezi podsítěmi.
+The web UI (HTTP) works from anywhere, but **driverless printing (AirPrint / IPP Everywhere) only works from a host on the same LAN** as the printer and the devices you print from — mDNS discovery runs over UDP multicast, which doesn't cross the internet or subnets.
 
-Navíc je potřeba **host networking** — v běžné Docker bridge síti se multicast na LAN nedostane. Nasaď proto službu s `network_mode: host` (v Coolify přes **Docker Compose** resource, kde si nastavíš host síť; konfiguraci nezapomeň perzistovat volume na `THERMAL_CONFIG_PATH`, aby zůstala vybraná tiskárna a UUID i po redeployi).
+Additionally, **host networking** is required — in a regular Docker bridge network the multicast doesn't reach the LAN. Deploy the service with `network_mode: host` (in Coolify via a **Docker Compose** resource where you configure the host network; don't forget to persist the configuration with a volume on `THERMAL_CONFIG_PATH`, so the selected printer and UUID survive a redeploy).
 
-Na hostiteli povol na LAN příchozí provoz:
+On the host, allow incoming LAN traffic on:
 
 - **UDP 5353** (mDNS/Bonjour discovery)
-- **TCP `IPP_PORT`** (výchozí 6310, IPP)
+- **TCP `IPP_PORT`** (default 6310, IPP)
 
-#### Routing domény při host networking (důležité)
+#### Domain routing with host networking (important)
 
-Coolify pole **Domains** u služby v `network_mode: host` **nefunguje** — automatické routování přes Traefik labely potřebuje kontejner na interní `coolify` síti, jenže host-networking kontejner na ní není (poslouchá přímo na hostiteli `:3000`). Výsledkem je, že doména spadne na Traefik výchozí `404 page not found`.
+The Coolify **Domains** field of a service in `network_mode: host` **doesn't work** — automatic routing via Traefik labels needs the container on the internal `coolify` network, but a host-networking container isn't on it (it listens directly on the host `:3000`). The result is that the domain falls through to Traefik's default `404 page not found`.
 
-Řešení — **nech pole Domains prázdné** a přidej Traefik **dynamickou konfiguraci** (v Coolify: _Server → Proxy → Dynamic Configurations_), která doménu nasměruje na hostitele přes `host.docker.internal`:
+The solution — **leave the Domains field empty** and add a Traefik **dynamic configuration** (in Coolify: _Server → Proxy → Dynamic Configurations_) that routes the domain to the host via `host.docker.internal`:
 
 ```yaml
 http:
   routers:
     thermal-print:
-      rule: "Host(`print.tvuj-podnik.cz`)"
+      rule: "Host(`print.your-company.com`)"
       entryPoints:
-        - http          # viz poznámka o dvouvrstvém Traefiku níže
+        - http          # see the note about two-layer Traefik below
       service: thermal-print
-      # tls:            # jen když TLS řeší tenhle (jediný) Traefik:
+      # tls:            # only when TLS is handled by this (the only) Traefik:
       #   certResolver: letsencrypt
   services:
     thermal-print:
       loadBalancer:
         servers:
-          - url: "http://host.docker.internal:3000"   # PORT z compose
+          - url: "http://host.docker.internal:3000"   # PORT from compose
 ```
 
-Ověř, že Coolify Traefik zná host gateway: `docker exec coolify-proxy getent hosts host.docker.internal` (vrátí IP). Když ne, dosaď v `url` přímo IP docker mostu (`docker exec coolify-proxy ip route | grep default`, typicky `172.17.0.1`).
+Verify that the Coolify Traefik knows the host gateway: `docker exec coolify-proxy getent hosts host.docker.internal` (returns an IP). If not, put the Docker bridge IP directly into `url` (`docker exec coolify-proxy ip route | grep default`, typically `172.17.0.1`).
 
-> **Dvouvrstvý Traefik:** pokud před Coolify Traefikem běží ještě jeden (edge) Traefik, který **terminuje TLS** a přeposílá dovnitř přes HTTP, nedávej do vnitřního routeru žádný `redirectScheme: https` middleware ani `tls` — vnitřní Traefik dostává provoz jako HTTP a redirect na https by se zacyklil (`307` donekonečna). TLS + certifikát řeš na vnějším Traefiku.
+> **Two-layer Traefik:** if another (edge) Traefik runs in front of the Coolify Traefik, **terminates TLS** and forwards inside over HTTP, don't put any `redirectScheme: https` middleware or `tls` into the inner router — the inner Traefik receives the traffic as HTTP and a redirect to https would loop (`307` forever). Handle TLS + the certificate on the outer Traefik.
 
-> **Pozor na `avahi-daemon`:** pokud na hostiteli běží (typicky desktopové Linuxy), drží UDP 5353 a mDNS advertising může kolidovat. Na serveru většinou neběží; pokud ano, buď ho vypni, nebo počítej s možnou kolizí (hlídej logy `mDNS advertising error`).
+> **Watch out for `avahi-daemon`:** if it runs on the host (typically desktop Linuxes), it holds UDP 5353 and mDNS advertising may collide. It usually doesn't run on servers; if it does, either disable it or expect a possible collision (watch the logs for `mDNS advertising error`).
 
-Po nasazení otevři web, v selectu se objeví nalezené tiskárny — jednu zahvězdičkuj jako cíl systémového tisku (nebo se první nalezená zvolí automaticky). Pak na klientech přidej tiskárnu (macOS AirPrint / Windows IPP Everywhere) — objeví se sama.
+After deployment, open the web UI — discovered printers appear in the list; star one as the target of system printing (or the first discovered one is chosen automatically). Then add the printer on the clients (macOS AirPrint / Windows IPP Everywhere) — it shows up by itself.
