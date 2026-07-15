@@ -263,7 +263,8 @@ label {
   margin-bottom: 12px;
 }
 
-.printers-manual input {
+/* input[type='text'] to outrank the later generic input[type='text'] rule */
+.printers-manual input[type='text'] {
   flex: 1;
   min-width: 110px;
   padding: 8px 10px;
