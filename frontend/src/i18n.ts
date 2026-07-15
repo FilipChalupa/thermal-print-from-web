@@ -135,8 +135,8 @@ const cs = {
   removeAria: (name: string) => `Odebrat ${name}`,
   addPrinter: 'Přidat tiskárnu',
   thermalPrinterFallbackName: 'Termální tiskárna',
-  namePlaceholder: 'Název (např. Kuchyně)',
-  ipPlaceholder: 'IP, např. 192.168.1.50',
+  namePlaceholder: 'Název',
+  ipPlaceholder: 'IP adresa',
   portPlaceholder: 'Port (9100)',
   add: 'Přidat',
 }
@@ -259,8 +259,8 @@ const en: Messages = {
   removeAria: (name: string) => `Remove ${name}`,
   addPrinter: 'Add printer',
   thermalPrinterFallbackName: 'Thermal printer',
-  namePlaceholder: 'Name (e.g. Kitchen)',
-  ipPlaceholder: 'IP, e.g. 192.168.1.50',
+  namePlaceholder: 'Name',
+  ipPlaceholder: 'IP address',
   portPlaceholder: 'Port (9100)',
   add: 'Add',
 }
