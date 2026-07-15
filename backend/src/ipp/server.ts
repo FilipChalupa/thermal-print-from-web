@@ -266,8 +266,8 @@ async function processJob(job: Job): Promise<void> {
 	const ip = job.target.targetIp
 	if (!ip) {
 		job.state = 8 // aborted
-		log.error('IPP job přijat, ale tiskárna nemá nastavenou cílovou IP.')
-		logJob({ source: 'ipp', printerIp: '', name: job.name, status: 'error', error: 'Není nastavená cílová tiskárna' })
+		log.error('IPP job accepted, but the printer has no target IP configured.')
+		logJob({ source: 'ipp', printerIp: '', name: job.name, status: 'error', error: 'no_target_printer' })
 		job.document = Buffer.alloc(0)
 		return
 	}

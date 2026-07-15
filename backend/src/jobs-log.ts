@@ -83,7 +83,7 @@ export function flushJobs(): void {
 	try {
 		writeJobsFile(jobsPath, entries)
 	} catch (err) {
-		log.error('Nepodařilo se uložit historii úloh:', err)
+		log.error('Failed to save the job history:', err)
 	}
 }
 

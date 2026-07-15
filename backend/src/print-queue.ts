@@ -129,7 +129,7 @@ async function drain(key: string): Promise<void> {
 				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'ok' }, item.payload, preview)
 				item.resolve()
 			} catch (err) {
-				const error = err instanceof Error ? err.message : 'Chyba tisku'
+				const error = err instanceof Error ? err.message : 'print_failed'
 				const preview = item.previewImages ?? (await item.meta.preview?.catch(() => undefined))
 				logJob({ source, printerIp: item.ip, name, pages, copies, format, status: 'error', error }, item.payload, preview)
 				notifyFailure(item.ip, name, error)

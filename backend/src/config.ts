@@ -158,7 +158,7 @@ export function setConfig(patch: Partial<Config>): Config {
 		writeFileSync(tmp, JSON.stringify(next, null, 2))
 		renameSync(tmp, CONFIG_PATH)
 	} catch (err) {
-		log.error(`Nepodařilo se uložit konfiguraci do ${CONFIG_PATH}:`, err)
+		log.error(`Failed to save the configuration to ${CONFIG_PATH}:`, err)
 	}
 	return next
 }

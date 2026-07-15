@@ -81,6 +81,21 @@ const cs = {
   pagesShort: (n: number) => `${n} str.`,
   genericError: 'chyba',
 
+  // Machine-readable error codes returned by the backend. Unknown strings
+  // (raw socket errors, pre-existing history entries) pass through untranslated.
+  backendErrors: {
+    too_many_requests: 'Příliš mnoho tiskových požadavků, zkus to za chvíli.',
+    ip_required: 'IP je povinná',
+    image_required: 'Je potřeba alespoň jeden obrázek',
+    name_and_ip_required: 'Název a IP jsou povinné',
+    preview_not_available: 'Náhled není k dispozici',
+    job_not_available: 'Úloha nebo její data nejsou k dispozici',
+    print_failed: 'chyba tisku',
+    drawer_failed: 'zásuvka nereaguje',
+    printer_timeout: 'tiskárna nereaguje (timeout 10 s)',
+    no_target_printer: 'není nastavená cílová tiskárna',
+  } as Record<string, string>,
+
   // Cash drawer + test receipt
   openingDrawer: 'Otevírám pokladní zásuvku…',
   drawerOpened: 'Pokladní zásuvka otevřena ✓',
@@ -205,6 +220,21 @@ const en: Messages = {
   pagesShort: (n: number) => `${n} pages`,
   genericError: 'error',
 
+  // Machine-readable error codes returned by the backend. Unknown strings
+  // (raw socket errors, pre-existing history entries) pass through untranslated.
+  backendErrors: {
+    too_many_requests: 'Too many print requests — try again in a moment.',
+    ip_required: 'IP address is required',
+    image_required: 'At least one image is required',
+    name_and_ip_required: 'Name and IP address are required',
+    preview_not_available: 'Preview is not available',
+    job_not_available: 'The job or its data is no longer available',
+    print_failed: 'print failed',
+    drawer_failed: 'the drawer is not responding',
+    printer_timeout: 'the printer is not responding (10 s timeout)',
+    no_target_printer: 'no target printer configured',
+  } as Record<string, string>,
+
   // Cash drawer + test receipt
   openingDrawer: 'Opening the cash drawer…',
   drawerOpened: 'Cash drawer opened ✓',
@@ -267,3 +297,8 @@ const en: Messages = {
 
 export const lang: Lang = detectLang()
 export const t: Messages = lang === 'cs' ? cs : en
+
+/** Translate a backend error (a machine code or a raw message) for display. */
+export function translateBackendError(error: string): string {
+  return t.backendErrors[error] ?? error
+}

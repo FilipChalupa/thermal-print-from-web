@@ -320,7 +320,8 @@ export function sendEscPos(host: string, payload: Buffer, port = DEFAULT_PORT): 
     })
     socket.setTimeout(10_000)
     socket.on('timeout', () => {
-      socket.destroy(new Error(`Tiskárna ${host} nereaguje (timeout 10 s)`))
+      // Machine-readable code: stored in the job log and translated by the UI.
+      socket.destroy(new Error('printer_timeout'))
     })
     socket.on('error', reject)
   })
@@ -395,7 +396,7 @@ export async function buildRasterPayload(pages: RasterPage[], copies: number): P
  * confirm a discovered device is really the intended thermal printer. Text is
  * encoded as CP852 for Czech characters.
  */
-export function buildTestPayload(name: string, ip: string, at = new Date()): Buffer {
+export function buildTestPayload(name: string, ip: string, at = new Date(), locale = 'en-US'): Buffer {
   const cp852 = (s: string) => iconv.encode(s, 'CP852')
   const DOUBLE = Buffer.from([0x1b, 0x21, 0x30]) // ESC ! — double width + height
   const NORMAL = Buffer.from([0x1b, 0x21, 0x00])
@@ -417,7 +418,7 @@ export function buildTestPayload(name: string, ip: string, at = new Date()): Buf
     NL,
     cp852(ip),
     NL,
-    cp852(at.toLocaleString('cs-CZ')),
+    cp852(at.toLocaleString(locale)),
     NL,
     FEED,
     cutBytes(),

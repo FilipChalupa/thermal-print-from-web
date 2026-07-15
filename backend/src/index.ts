@@ -54,7 +54,7 @@ async function onPrintersChanged(): Promise<void> {
     await runtime.mdns?.stop()
     runtime.mdns = startMdns({ port: runtime.ippPort })
   } catch (err) {
-    log.error('Nepodařilo se znovu ohlásit tiskárny přes mDNS:', err)
+    log.error('Failed to re-advertise printers over mDNS:', err)
   }
 }
 
@@ -74,7 +74,7 @@ function startNetworkWatcher(): NodeJS.Timeout {
     const sig = networkSignature()
     if (sig !== last) {
       last = sig
-      log.info('Síť se změnila — znovu ohlašuji tiskárny přes mDNS.')
+      log.info('Network changed — re-advertising printers over mDNS.')
       void onPrintersChanged()
     }
   }, 30_000)
@@ -120,7 +120,7 @@ async function rateLimit(c: Context, next: Next) {
   const now = Date.now()
   const recent = (rateHits.get(ip) ?? []).filter((t) => now - t < 60_000)
   if (recent.length >= RATE_LIMIT_PER_MIN) {
-    return c.json({ error: 'Příliš mnoho tiskových požadavků, zkus to za chvíli.' }, 429)
+    return c.json({ error: 'too_many_requests' }, 429)
   }
   recent.push(now)
   rateHits.set(ip, recent)
@@ -141,16 +141,20 @@ app.post('/print', rateLimit, async (c) => {
   const port = parsePort(formData.get('port'))
 
   if (!ip || typeof ip !== 'string') {
-    return c.json({ error: 'IP address is required' }, 400)
+    return c.json({ error: 'ip_required' }, 400)
   }
   if (imageFiles.length === 0) {
-    return c.json({ error: 'At least one image is required' }, 400)
+    return c.json({ error: 'image_required' }, 400)
   }
 
   const copies = Math.max(1, Math.min(99, parseInt(copiesRaw as string) || 1))
 
+  // Language-neutral job name for the history: first filename, "+N" for the rest.
+  const firstFile = imageFiles.find((f) => f instanceof File)
+  const jobName = `${firstFile?.name ?? 'image'}${imageFiles.length > 1 ? ` +${imageFiles.length - 1}` : ''}`
+
   return stream(c, async (s) => {
-    await s.write(JSON.stringify({ type: 'progress', current: 1, total: 1, name: 'příprava' }) + '\n')
+    await s.write(JSON.stringify({ type: 'progress', current: 1, total: 1, name: jobName }) + '\n')
     try {
       const buffers: Buffer[] = []
       for (const image of imageFiles) {
@@ -159,10 +163,10 @@ app.post('/print', rateLimit, async (c) => {
       const { payload, preview } = await buildImagesJob(buffers, copies)
       // The queue serializes with other jobs, retries if the printer is briefly
       // offline, and logs the job (with payload for reprint + preview image).
-      await enqueuePrint(ip, payload, { source: 'web', name: `${buffers.length}× obrázek`, pages: buffers.length, copies, format: 'image', port, preview })
+      await enqueuePrint(ip, payload, { source: 'web', name: jobName, pages: buffers.length, copies, format: 'image', port, preview })
       await s.write(JSON.stringify({ type: 'done' }) + '\n')
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Chyba při tisku'
+      const message = err instanceof Error ? err.message : 'print_failed'
       await s.write(JSON.stringify({ type: 'error', message }) + '\n')
     }
   })
@@ -209,7 +213,7 @@ app.post('/printers', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
-  if (!name || !ip) return c.json({ error: 'name a ip jsou povinné' }, 400)
+  if (!name || !ip) return c.json({ error: 'name_and_ip_required' }, 400)
   const printer = addPrinter(name, ip, body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT)
   await onPrintersChanged()
   return c.json({ ...printersResponse(), printer })
@@ -244,7 +248,7 @@ app.get('/discover', async (c) => {
   try {
     return c.json({ printers: await discoverPrinters() })
   } catch (err) {
-    log.error('Discovery selhalo:', err)
+    log.error('Discovery failed:', err)
     return c.json({ printers: [] })
   }
 })
@@ -263,7 +267,7 @@ app.get('/discover/stream', (c) =>
         await s.writeSSE({ event: 'printer', data: JSON.stringify(printer) })
       })
     } catch (err) {
-      log.error('Streaming discovery selhalo:', err)
+      log.error('Streaming discovery failed:', err)
     }
     await s.writeSSE({ event: 'done', data: '{}' })
   }),
@@ -281,13 +285,13 @@ app.get('/jobs', (c) =>
  * ids are recycled across restarts, so those must not be cached.
  */
 function previewResponse(c: Context, preview: Buffer | undefined, immutable: boolean) {
-  if (!preview) return c.json({ error: 'Náhled není k dispozici' }, 404)
+  if (!preview) return c.json({ error: 'preview_not_available' }, 404)
   const ab = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer
   const headers: Record<string, string> = {
     'Content-Type': 'image/png',
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
   }
-  if (c.req.query('download') !== undefined) headers['Content-Disposition'] = `attachment; filename="tisk-${c.req.param('id')}.png"`
+  if (c.req.query('download') !== undefined) headers['Content-Disposition'] = `attachment; filename="print-${c.req.param('id')}.png"`
   return c.body(ab, 200, headers)
 }
 
@@ -309,7 +313,7 @@ app.post('/jobs/:id/reprint', rateLimit, async (c) => {
   const id = Number(c.req.param('id'))
   const entry = getJobEntry(id)
   const payload = getJobPayload(id)
-  if (!entry || !payload) return c.json({ error: 'Úloha nebo její data nejsou k dispozici' }, 404)
+  if (!entry || !payload) return c.json({ error: 'job_not_available' }, 404)
   const port = getPrinters().find((p) => p.ip === entry.printerIp)?.port ?? DEFAULT_PORT
   try {
     await enqueuePrint(entry.printerIp, payload, {
@@ -323,7 +327,7 @@ app.post('/jobs/:id/reprint', rateLimit, async (c) => {
     })
     return c.json({ ok: true })
   } catch (err) {
-    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'print_failed' }, 502)
   }
 })
 
@@ -349,32 +353,37 @@ app.get('/health', async (c) => {
   })
 })
 
+// Locale for the test receipt's timestamp — the client sends its UI language.
+const receiptLocale = (lang: unknown): string => (lang === 'cs' ? 'cs-CZ' : 'en-US')
+
 // Print a text test receipt (name + IP) to a single printer.
 app.post('/print-test', rateLimit, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
-  const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Termální tiskárna'
+  const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Thermal Printer'
   const port = body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT
-  if (!ip) return c.json({ error: 'IP je povinná' }, 400)
+  if (!ip) return c.json({ error: 'ip_required' }, 400)
   try {
-    await enqueuePrint(ip, buildTestPayload(name, ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port })
+    await enqueuePrint(ip, buildTestPayload(name, ip, new Date(), receiptLocale(body.lang)), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port })
     return c.json({ ok: true })
   } catch (err) {
-    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }, 502)
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'print_failed' }, 502)
   }
 })
 
 // Print a test receipt to every discovered printer.
 app.post('/print-test-all', rateLimit, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const locale = receiptLocale(body.lang)
   const printers = await discoverPrinters()
   const results = await Promise.all(
     printers.map(async (p) => {
-      const name = p.name ?? 'Termální tiskárna'
+      const name = p.name ?? 'Thermal Printer'
       try {
-        await enqueuePrint(p.ip, buildTestPayload(name, p.ip), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port: p.port })
+        await enqueuePrint(p.ip, buildTestPayload(name, p.ip, new Date(), locale), { source: 'test', name: `Test: ${name}`, copies: 1, format: 'text', port: p.port })
         return { ip: p.ip, ok: true }
       } catch (err) {
-        return { ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'Chyba tisku' }
+        return { ip: p.ip, ok: false, error: err instanceof Error ? err.message : 'print_failed' }
       }
     }),
   )
@@ -386,12 +395,12 @@ app.post('/drawer', rateLimit, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const ip = typeof body.ip === 'string' ? body.ip.trim() : ''
   const port = body.port !== undefined ? parsePort(body.port) : DEFAULT_PORT
-  if (!ip) return c.json({ error: 'IP je povinná' }, 400)
+  if (!ip) return c.json({ error: 'ip_required' }, 400)
   try {
     await openCashDrawer(ip, port)
     return c.json({ ok: true })
   } catch (err) {
-    return c.json({ ok: false, error: err instanceof Error ? err.message : 'Chyba' }, 502)
+    return c.json({ ok: false, error: err instanceof Error ? err.message : 'drawer_failed' }, 502)
   }
 })
 
@@ -418,12 +427,12 @@ async function autoConfigurePrinter(): Promise<void> {
     if (getPrinters().length > 0) return
     const pick = pickDefaultPrinter(await discoverPrinters())
     if (pick) {
-      addPrinter(pick.name ?? 'Termální tiskárna', pick.ip)
-      log.info(`Automaticky přidána tiskárna: ${pick.name ?? pick.ip} (${pick.ip})`)
+      addPrinter(pick.name ?? 'Thermal Printer', pick.ip)
+      log.info(`Auto-added printer: ${pick.name ?? pick.ip} (${pick.ip})`)
       await onPrintersChanged()
     }
   } catch (err) {
-    log.error('Automatická volba tiskárny selhala:', err)
+    log.error('Automatic printer selection failed:', err)
   }
 }
 
@@ -466,7 +475,7 @@ export function startServer(
         runtime.timers.push(startNetworkWatcher())
         resolve({ port: info.port, ippPort: ipp.port, close: shutdown })
       } catch (err) {
-        log.error('Nepodařilo se spustit IPP/mDNS (tisková služba v síti):', err)
+        log.error('Failed to start IPP/mDNS (network print service):', err)
         resolve({ port: info.port, close: shutdown })
       }
     })
@@ -479,7 +488,7 @@ if (isRunDirectly) {
     // Stop advertising + close listeners cleanly on redeploy / Ctrl-C.
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       process.once(signal, async () => {
-        log.info(`\n${signal} — ukončuji…`)
+        log.info(`\n${signal} — shutting down…`)
         await handle.close?.()
         process.exit(0)
       })

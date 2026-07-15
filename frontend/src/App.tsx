@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useMirrorLoading } from 'shared-loading-indicator'
 import Printers, { type DiscoveredPrinter, type NetworkPrinter } from './Printers'
-import { t } from './i18n'
+import { lang, t, translateBackendError } from './i18n'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
@@ -78,7 +78,7 @@ function jobMeta(j: JobLogEntry): string {
   if (j.format) parts.push(FORMAT_LABELS[j.format])
   if (j.copies && j.copies > 1) parts.push(`${j.copies}×`)
   if (j.pages && j.pages > 1) parts.push(t.pagesShort(j.pages))
-  if (j.status === 'error' && j.error) parts.push(j.error)
+  if (j.status === 'error' && j.error) parts.push(translateBackendError(j.error))
   return parts.join(' · ')
 }
 
@@ -231,7 +231,6 @@ export default function App() {
         /* no shared images available */
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Live discovery over SSE: printers appear as they are found.
@@ -351,7 +350,7 @@ export default function App() {
       body: JSON.stringify({ ip: defaultIp, port: defaultPrinter?.port ?? 9100 }),
     })
       .then((r) => r.json().catch(() => ({})))
-      .then((d) => setTestMsg(d?.ok ? t.drawerOpened : t.drawerFailed(d?.error ?? t.genericError)))
+      .then((d) => setTestMsg(d?.ok ? t.drawerOpened : t.drawerFailed(translateBackendError(d?.error ?? t.genericError))))
       .catch(() => setTestMsg(t.drawerFailedPlain))
       .finally(() => setTesting(false))
   }
@@ -377,10 +376,10 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/print-test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, name, port }),
+        body: JSON.stringify({ ip, name, port, lang }),
       })
       const d = await res.json().catch(() => ({}))
-      setTestMsg(res.ok && d.ok ? t.testSent(ip) : t.testFailed(ip, d.error ?? t.genericError))
+      setTestMsg(res.ok && d.ok ? t.testSent(ip) : t.testFailed(ip, translateBackendError(d.error ?? t.genericError)))
     } catch {
       setTestMsg(t.testSendError(ip))
     } finally {
@@ -530,7 +529,7 @@ export default function App() {
     } catch (err) {
       setStatus('error')
       setProgress(null)
-      setErrorMsg(err instanceof Error ? err.message : 'Unknown error')
+      setErrorMsg(translateBackendError(err instanceof Error ? err.message : t.genericError))
       refreshJobs()
     }
   }

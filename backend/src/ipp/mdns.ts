@@ -20,7 +20,7 @@ export function startMdns(options: { port: number }): MdnsHandle {
 	// each on its own resource path so the OS treats them as distinct printers.
 	for (const printer of getAdvertisedPrinters()) {
 		// Disambiguate otherwise-identical printers on the network: append the IP's
-		// last octet to the advertised name (e.g. "Termální tiskárna (119)") and put
+		// last octet to the advertised name (e.g. "Thermal Printer (119)") and put
 		// the full target IP in `note` — the OS shows it as the printer's Location.
 		const lastOctet = /^\d+\.\d+\.\d+\.(\d+)$/.exec(printer.targetIp)?.[1]
 		const advertisedName = lastOctet ? `${printer.name} (${lastOctet})` : printer.name
