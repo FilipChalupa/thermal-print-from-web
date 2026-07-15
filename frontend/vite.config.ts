@@ -15,11 +15,13 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
       },
+      // The manifest is static (built once), so it can't follow the browser
+      // language — English is the neutral default; the UI itself is localized.
       manifest: {
-        name: 'Termální tisk',
-        short_name: 'Termální tisk',
-        description: 'Tisk obrázků na termální tiskárny + síťová AirPrint/IPP tiskárna',
-        lang: 'cs',
+        name: 'Thermal Print',
+        short_name: 'Thermal Print',
+        description: 'Print images on thermal printers + networked AirPrint/IPP printer',
+        lang: 'en',
         theme_color: '#0e0f14',
         background_color: '#0e0f14',
         display: 'standalone',

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from './i18n'
 
 export interface NetworkPrinter {
   id: string
@@ -87,13 +88,13 @@ export default function Printers({
   return (
     <section className="printers card">
       <div className="printers-head">
-        <h2>Tiskárny{printers.length > 0 ? ` (${printers.length})` : ''}</h2>
+        <h2>{t.printersHeading}{printers.length > 0 ? ` (${printers.length})` : ''}</h2>
         <button type="button" className="printers-refresh" onClick={onRefresh} disabled={discovering}>
-          {discovering ? 'Hledám…' : '↻ Vyhledat'}
+          {discovering ? t.searching : t.search}
         </button>
       </div>
 
-      {printers.length === 0 && <p className="printers-empty">Zatím žádná tiskárna — přidej ji níže.</p>}
+      {printers.length === 0 && <p className="printers-empty">{t.noPrintersYet}</p>}
 
       <ul className="printers-list">
         {printers.map((p) => {
@@ -104,12 +105,12 @@ export default function Printers({
                 type="button"
                 className={`p-star${isDefault ? ' on' : ''}`}
                 onClick={() => onSetDefault(p.id)}
-                title={isDefault ? 'Výchozí tiskárna (Cmd/Ctrl+P i web tisk)' : 'Nastavit jako výchozí'}
-                aria-label="Výchozí tiskárna"
+                title={isDefault ? t.defaultPrinterTitle : t.setAsDefault}
+                aria-label={t.defaultPrinterAria}
               >
                 {isDefault ? '★' : '☆'}
               </button>
-              <span className={`p-dot ${isOnline(p) ? 'online' : 'offline'}`} title={isOnline(p) ? 'Online' : 'Offline'} />
+              <span className={`p-dot ${isOnline(p) ? 'online' : 'offline'}`} title={isOnline(p) ? t.online : t.offline} />
               {editingId === p.id ? (
                 <input
                   className="p-rename"
@@ -128,7 +129,7 @@ export default function Printers({
                 <span className="p-main">
                   <span className="p-name">
                     {p.name}
-                    {isDefault && <span className="p-badge">výchozí</span>}
+                    {isDefault && <span className="p-badge">{t.defaultBadge}</span>}
                     {isDefault && defaultBadge && <span className={`reach-badge ${defaultBadge.cls}`}>{defaultBadge.label}</span>}
                   </span>
                   <span className="p-ip">{p.port && p.port !== 9100 ? `${p.ip}:${p.port}` : p.ip}</span>
@@ -141,15 +142,15 @@ export default function Printers({
                   setEditingId(p.id)
                   setDraft(p.name)
                 }}
-                title="Přejmenovat"
-                aria-label={`Přejmenovat ${p.name}`}
+                title={t.renameTitle}
+                aria-label={t.renameAria(p.name)}
               >
                 <PencilIcon />
               </button>
-              <button type="button" className="p-icon" onClick={() => onTest(p.ip, p.name, p.port)} title="Vytisknout testovací lístek" aria-label={`Test na ${p.ip}`}>
+              <button type="button" className="p-icon" onClick={() => onTest(p.ip, p.name, p.port)} title={t.printTestTitle} aria-label={t.testAria(p.ip)}>
                 <PrinterIcon />
               </button>
-              <button type="button" className="p-icon p-remove" onClick={() => onRemove(p.id)} title="Odebrat" aria-label={`Odebrat ${p.name}`}>
+              <button type="button" className="p-icon p-remove" onClick={() => onRemove(p.id)} title={t.remove} aria-label={t.removeAria(p.name)}>
                 ✕
               </button>
             </li>
@@ -158,15 +159,15 @@ export default function Printers({
       </ul>
 
       <details className="printers-add" open={printers.length === 0}>
-        <summary>Přidat tiskárnu</summary>
+        <summary>{t.addPrinter}</summary>
         {suggestions.length > 0 && (
           <ul className="printers-suggest">
             {suggestions.map((d) => (
               <li key={d.ip}>
-                <button type="button" onClick={() => onAdd(d.name ?? 'Termální tiskárna', d.ip, 9100)}>
+                <button type="button" onClick={() => onAdd(d.name ?? t.thermalPrinterFallbackName, d.ip, 9100)}>
                   <span className="p-plus">＋</span>
                   <span className="p-main">
-                    <span className="p-name">{d.name ?? 'Termální tiskárna'}</span>
+                    <span className="p-name">{d.name ?? t.thermalPrinterFallbackName}</span>
                     <span className="p-ip">{d.ip}</span>
                   </span>
                 </button>
@@ -175,13 +176,13 @@ export default function Printers({
           </ul>
         )}
         <div className="printers-manual">
-          <input type="text" placeholder="Název (např. Kuchyně)" value={manualName} onChange={(e) => setManualName(e.target.value)} />
-          <input type="text" inputMode="numeric" placeholder="IP, např. 192.168.1.50" value={manualIp} onChange={(e) => setManualIp(e.target.value)} />
+          <input type="text" placeholder={t.namePlaceholder} value={manualName} onChange={(e) => setManualName(e.target.value)} />
+          <input type="text" inputMode="numeric" placeholder={t.ipPlaceholder} value={manualIp} onChange={(e) => setManualIp(e.target.value)} />
           <input
             type="text"
             inputMode="numeric"
             className="p-port-input"
-            placeholder="Port (9100)"
+            placeholder={t.portPlaceholder}
             value={manualPort}
             onChange={(e) => setManualPort(e.target.value.replace(/\D/g, ''))}
           />
@@ -196,7 +197,7 @@ export default function Printers({
               setManualPort('')
             }}
           >
-            Přidat
+            {t.add}
           </button>
         </div>
       </details>

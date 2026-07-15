@@ -1,17 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useMirrorLoading } from 'shared-loading-indicator'
 import Printers, { type DiscoveredPrinter, type NetworkPrinter } from './Printers'
+import { t } from './i18n'
 import './App.css'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? ''
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/
-
-// Czech pluralization: [1, 2–4, 5+ / 0]. e.g. czPlural(2, ['fotka','fotky','fotek'])
-function czPlural(n: number, forms: [string, string, string]): string {
-  if (n === 1) return forms[0]
-  if (n >= 2 && n <= 4) return forms[1]
-  return forms[2]
-}
 
 interface ImageItem {
   file: File
@@ -27,12 +21,7 @@ interface PrintProgress {
 
 type DitherAlgorithm = 'floyd' | 'atkinson' | 'ordered' | 'threshold'
 
-const DITHER_LABELS: Record<DitherAlgorithm, string> = {
-  floyd: 'Floyd–Steinberg',
-  atkinson: 'Atkinson',
-  ordered: 'Ordered (rastr)',
-  threshold: 'Práh (bez ditheru)',
-}
+const DITHER_LABELS: Record<DitherAlgorithm, string> = t.ditherLabels
 
 interface TargetStatus {
   reachable: boolean
@@ -41,13 +30,13 @@ interface TargetStatus {
   coverOpen: boolean
 }
 
-function targetBadge(t: TargetStatus | null): { cls: 'online' | 'offline'; label: string } | null {
-  if (!t) return null
-  if (!t.reachable) return { cls: 'offline', label: 'offline' }
-  if (t.paperOut) return { cls: 'offline', label: 'došel papír' }
-  if (t.coverOpen) return { cls: 'offline', label: 'otevřené víko' }
-  if (!t.online) return { cls: 'offline', label: 'není připraveno' }
-  return { cls: 'online', label: 'online' }
+function targetBadge(status: TargetStatus | null): { cls: 'online' | 'offline'; label: string } | null {
+  if (!status) return null
+  if (!status.reachable) return { cls: 'offline', label: t.statusOffline }
+  if (status.paperOut) return { cls: 'offline', label: t.statusPaperOut }
+  if (status.coverOpen) return { cls: 'offline', label: t.statusCoverOpen }
+  if (!status.online) return { cls: 'offline', label: t.statusNotReady }
+  return { cls: 'online', label: t.statusOnline }
 }
 
 interface JobLogEntry {
@@ -65,20 +54,11 @@ interface JobLogEntry {
   hasPreview?: boolean
 }
 
-const FORMAT_LABELS: Record<NonNullable<JobLogEntry['format']>, string> = {
-  image: 'Obrázek',
-  pdf: 'PDF',
-  raster: 'Rastr',
-  text: 'Text',
-}
+const FORMAT_LABELS: Record<NonNullable<JobLogEntry['format']>, string> = t.formatLabels
 
 type CutMode = 'full' | 'partial' | 'none'
 
-const CUT_LABELS: Record<CutMode, string> = {
-  full: 'Úplný střih',
-  partial: 'Částečný střih',
-  none: 'Bez střihu',
-}
+const CUT_LABELS: Record<CutMode, string> = t.cutLabels
 
 interface QueueJob {
   id: number
@@ -91,17 +71,13 @@ interface QueueJob {
   hasPreview?: boolean
 }
 
-const QUEUE_STATE_LABELS: Record<QueueJob['state'], string> = {
-  printing: 'Tiskne se',
-  queued: 'Ve frontě',
-  waiting: 'Čeká na tiskárnu',
-}
+const QUEUE_STATE_LABELS: Record<QueueJob['state'], string> = t.queueStateLabels
 
 function jobMeta(j: JobLogEntry): string {
   const parts = [j.printerIp || '—']
   if (j.format) parts.push(FORMAT_LABELS[j.format])
   if (j.copies && j.copies > 1) parts.push(`${j.copies}×`)
-  if (j.pages && j.pages > 1) parts.push(`${j.pages} str.`)
+  if (j.pages && j.pages > 1) parts.push(t.pagesShort(j.pages))
   if (j.status === 'error' && j.error) parts.push(j.error)
   return parts.join(' · ')
 }
@@ -246,7 +222,7 @@ export default function App() {
           const res = await cache.match(key)
           if (!res) continue
           const blob = await res.blob()
-          const name = decodeURIComponent(res.headers.get('X-Filename') ?? 'sdilene.jpg')
+          const name = decodeURIComponent(res.headers.get('X-Filename') ?? t.sharedFilename)
           shared.push(new File([blob], name, { type: blob.type }))
           await cache.delete(key)
         }
@@ -368,15 +344,15 @@ export default function App() {
   function openDrawer() {
     if (!IPV4.test(defaultIp)) return
     setTesting(true)
-    setTestMsg('Otevírám pokladní zásuvku…')
+    setTestMsg(t.openingDrawer)
     fetch(`${BACKEND_URL}/drawer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip: defaultIp, port: defaultPrinter?.port ?? 9100 }),
     })
       .then((r) => r.json().catch(() => ({})))
-      .then((d) => setTestMsg(d?.ok ? 'Pokladní zásuvka otevřena ✓' : `Zásuvku se nepodařilo otevřít: ${d?.error ?? 'chyba'}`))
-      .catch(() => setTestMsg('Zásuvku se nepodařilo otevřít'))
+      .then((d) => setTestMsg(d?.ok ? t.drawerOpened : t.drawerFailed(d?.error ?? t.genericError)))
+      .catch(() => setTestMsg(t.drawerFailedPlain))
       .finally(() => setTesting(false))
   }
 
@@ -396,7 +372,7 @@ export default function App() {
   // Print a text test receipt so the user can confirm which device an IP is.
   async function printTest(ip: string, name: string, port: number) {
     setTesting(true)
-    setTestMsg(`Posílám testovací lístek na ${ip}…`)
+    setTestMsg(t.sendingTest(ip))
     try {
       const res = await fetch(`${BACKEND_URL}/print-test`, {
         method: 'POST',
@@ -404,9 +380,9 @@ export default function App() {
         body: JSON.stringify({ ip, name, port }),
       })
       const d = await res.json().catch(() => ({}))
-      setTestMsg(res.ok && d.ok ? `Testovací lístek odeslán na ${ip} ✓` : `Tisk na ${ip} selhal: ${d.error ?? 'chyba'}`)
+      setTestMsg(res.ok && d.ok ? t.testSent(ip) : t.testFailed(ip, d.error ?? t.genericError))
     } catch {
-      setTestMsg(`Nepodařilo se odeslat test na ${ip}`)
+      setTestMsg(t.testSendError(ip))
     } finally {
       setTesting(false)
       refreshJobs()
@@ -565,18 +541,19 @@ export default function App() {
     <>
       {pageDragging && (
         <div className="drag-overlay" onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
-          <p>Pustit pro přidání obrázků</p>
+          <p>{t.dropOverlay}</p>
         </div>
       )}
       <main>
-        <h1>Termální tisk</h1>
+        <h1>{t.appTitle}</h1>
 
         <form onSubmit={handleSubmit} className="print-form card">
-          <h2 className="print-heading">Tisk obrázků</h2>
+          <h2 className="print-heading">{t.printImagesHeading}</h2>
           <div className="drop-zone" onClick={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => e.target.files && addFiles(e.target.files)} style={{ display: 'none' }} />
             <p>
-              Přetáhněte obrázky kamkoliv, vložte z clipboardu nebo <span className="link">vyberte ze souborů</span>
+              {t.dropHint}
+              <span className="link">{t.dropHintAction}</span>
             </p>
           </div>
 
@@ -597,10 +574,10 @@ export default function App() {
                       <img src={item.preview} alt={item.file.name} style={{ transform: `rotate(${item.rotation}deg)` }} />
                     </div>
                     <div className="preview-actions">
-                      <button type="button" className="action-btn" onClick={() => rotateImage(i)} title="Otočit">
+                      <button type="button" className="action-btn" onClick={() => rotateImage(i)} title={t.rotate}>
                         ↻
                       </button>
-                      <button type="button" className="action-btn remove" onClick={() => removeImage(i)} title="Odebrat">
+                      <button type="button" className="action-btn remove" onClick={() => removeImage(i)} title={t.remove}>
                         ×
                       </button>
                     </div>
@@ -611,15 +588,15 @@ export default function App() {
                 ))}
               </ul>
               <button type="button" className="remove-all-btn" onClick={() => setItems([])}>
-                Odebrat vše
+                {t.removeAll}
               </button>
             </>
           )}
 
           <div className="copies-row">
-            <span className="copies-label">Počet výtisků</span>
+            <span className="copies-label">{t.copiesLabel}</span>
             <div className="stepper">
-              <button type="button" onClick={() => setCopies((c) => Math.max(1, c - 1))} aria-label="Méně" disabled={copies <= 1}>
+              <button type="button" onClick={() => setCopies((c) => Math.max(1, c - 1))} aria-label={t.fewer} disabled={copies <= 1}>
                 −
               </button>
               <input
@@ -629,7 +606,7 @@ export default function App() {
                 max={99}
                 onChange={(e) => setCopies(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
               />
-              <button type="button" onClick={() => setCopies((c) => Math.min(99, c + 1))} aria-label="Více" disabled={copies >= 99}>
+              <button type="button" onClick={() => setCopies((c) => Math.min(99, c + 1))} aria-label={t.more} disabled={copies >= 99}>
                 +
               </button>
             </div>
@@ -638,14 +615,14 @@ export default function App() {
           <button type="submit" className="print-btn" disabled={status === 'loading' || items.length === 0 || !IPV4.test(defaultIp)}>
             {status === 'loading'
               ? progress
-                ? `Tisknu ${progress.current}/${progress.total}…`
-                : 'Připravuji…'
-              : `Tisknout${defaultPrinter ? ` na ${defaultPrinter.name}` : ''}${items.length > 1 ? ` · ${items.length} ${czPlural(items.length, ['fotka', 'fotky', 'fotek'])}` : ''}`}
+                ? t.printingProgress(progress.current, progress.total)
+                : t.preparing
+              : t.printButton(defaultPrinter?.name, items.length)}
           </button>
         </form>
 
-        {status === 'success' && <p className="msg success">Odesláno do tiskárny!</p>}
-        {status === 'error' && <p className="msg error">Chyba: {errorMsg}</p>}
+        {status === 'success' && <p className="msg success">{t.sentToPrinter}</p>}
+        {status === 'error' && <p className="msg error">{t.errorPrefix}: {errorMsg}</p>}
 
         <Printers
           printers={printers}
@@ -664,16 +641,16 @@ export default function App() {
         {testMsg && <p className="test-msg">{testMsg}</p>}
 
         <details className="settings card">
-          <summary>Nastavení tisku</summary>
+          <summary>{t.settingsSummary}</summary>
           <label className="field">
-            Šířka papíru
+            {t.paperWidth}
             <select value={paperWidthDots} onChange={(e) => changePaperWidth(Number(e.target.value))}>
-              <option value={576}>80 mm (576 bodů)</option>
-              <option value={384}>58 mm (384 bodů)</option>
+              <option value={576}>{t.paperWidth80}</option>
+              <option value={384}>{t.paperWidth58}</option>
             </select>
           </label>
           <label className="field">
-            Střih po tisku
+            {t.cutAfterPrint}
             <select value={cutMode} onChange={(e) => changeCutMode(e.target.value as CutMode)}>
               {(Object.keys(CUT_LABELS) as CutMode[]).map((m) => (
                 <option key={m} value={m}>
@@ -683,7 +660,7 @@ export default function App() {
             </select>
           </label>
           <label className="field">
-            Dithering
+            {t.dithering}
             <select
               value={ditherAlgorithm}
               onChange={(e) => {
@@ -701,25 +678,25 @@ export default function App() {
           </label>
           <label className="slider">
             <span>
-              Jas <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
+              {t.brightness} <em>{brightness > 0 ? `+${brightness}` : brightness}</em>
             </span>
             <input type="range" min={-100} max={100} value={brightness} onChange={(e) => { const v = Number(e.target.value); setBrightness(v); postSettings({ brightness: v }) }} />
           </label>
           <label className="slider">
             <span>
-              Kontrast <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
+              {t.contrast} <em>{contrast > 0 ? `+${contrast}` : contrast}</em>
             </span>
             <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
           </label>
           <button type="button" className="drawer-btn" onClick={openDrawer} disabled={testing || !IPV4.test(defaultIp)}>
-            Otevřít pokladní zásuvku
+            {t.openDrawerButton}
           </button>
         </details>
 
         {queue.length > 0 && (
           <section className="queue card">
             <div className="jobs-head">
-              <h2>Fronta ({queue.length})</h2>
+              <h2>{t.queueHeading} ({queue.length})</h2>
             </div>
             <ul className="jobs-list">
               {queue.map((q) => (
@@ -730,8 +707,8 @@ export default function App() {
                       type="button"
                       className="job-thumb"
                       onClick={() => setPreviewSrc(`${BACKEND_URL}/queue/${q.id}/preview`)}
-                      title="Zobrazit náhled tisku"
-                      aria-label="Zobrazit náhled tisku"
+                      title={t.showPrintPreview}
+                      aria-label={t.showPrintPreview}
                     >
                       <img src={`${BACKEND_URL}/queue/${q.id}/preview?thumb`} alt="" loading="lazy" />
                     </button>
@@ -756,8 +733,8 @@ export default function App() {
         {jobs.length > 0 && (
           <section className="jobs card">
             <div className="jobs-head">
-              <h2>Poslední úlohy</h2>
-              <button type="button" className="jobs-refresh" onClick={refreshJobs} title="Obnovit">
+              <h2>{t.recentJobs}</h2>
+              <button type="button" className="jobs-refresh" onClick={refreshJobs} title={t.refresh}>
                 ↻
               </button>
             </div>
@@ -772,8 +749,8 @@ export default function App() {
                       type="button"
                       className="job-thumb"
                       onClick={() => setPreviewSrc(`${BACKEND_URL}/jobs/${j.id}/preview`)}
-                      title="Zobrazit náhled tisku"
-                      aria-label="Zobrazit náhled tisku"
+                      title={t.showPrintPreview}
+                      aria-label={t.showPrintPreview}
                     >
                       <img src={`${BACKEND_URL}/jobs/${j.id}/preview?thumb`} alt="" loading="lazy" />
                     </button>
@@ -790,8 +767,8 @@ export default function App() {
                       type="button"
                       className="job-reprint"
                       onClick={() => reprintJob(j.id)}
-                      title={j.status === 'ok' ? 'Vytisknout znovu' : 'Zkusit znovu'}
-                      aria-label={j.status === 'ok' ? 'Vytisknout znovu' : 'Zkusit znovu'}
+                      title={j.status === 'ok' ? t.printAgain : t.retry}
+                      aria-label={j.status === 'ok' ? t.printAgain : t.retry}
                     >
                       ↻
                     </button>
@@ -804,18 +781,18 @@ export default function App() {
 
         {previewSrc !== null && (
           <div className="preview-overlay" role="dialog" aria-modal="true" onClick={() => setPreviewSrc(null)}>
-            <img className="preview-full" src={previewSrc} alt="Náhled tisku" onClick={(e) => e.stopPropagation()} />
+            <img className="preview-full" src={previewSrc} alt={t.printPreviewAlt} onClick={(e) => e.stopPropagation()} />
             <div className="preview-toolbar" onClick={(e) => e.stopPropagation()}>
               <a
                 className="preview-download"
                 href={`${previewSrc}?download`}
                 download
-                title="Stáhnout náhled (PNG)"
-                aria-label="Stáhnout náhled"
+                title={t.downloadPreviewTitle}
+                aria-label={t.downloadPreview}
               >
                 ↓
               </a>
-              <button type="button" className="preview-close" onClick={() => setPreviewSrc(null)} aria-label="Zavřít">
+              <button type="button" className="preview-close" onClick={() => setPreviewSrc(null)} aria-label={t.close}>
                 ✕
               </button>
             </div>
@@ -827,14 +804,14 @@ export default function App() {
 }
 
 function jobSourceLabel(source: JobLogEntry['source']): string {
-  return source === 'ipp' ? 'Systém' : source === 'web' ? 'Web' : source === 'reprint' ? 'Přetisk' : 'Test'
+  return t.jobSourceLabels[source]
 }
 
 function relativeTime(at: number): string {
   const s = Math.floor((Date.now() - at) / 1000)
-  if (s < 45) return 'právě teď'
+  if (s < 45) return t.justNow
   const m = Math.floor(s / 60)
-  if (m < 1) return 'před chvílí'
-  if (m < 60) return `před ${m} min`
-  return new Date(at).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
+  if (m < 1) return t.momentAgo
+  if (m < 60) return t.minutesAgo(m)
+  return new Date(at).toLocaleTimeString(t.locale, { hour: '2-digit', minute: '2-digit' })
 }
