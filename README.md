@@ -2,6 +2,15 @@
 
 Web application for printing images on Epson thermal printers over the ESC/POS protocol.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
+    <img src="docs/screenshots/overview-light.png" alt="Web UI: images queued for printing, the printer list with the starred default, the live print queue and job history" width="420">
+  </picture>
+</p>
+
+<sub>Screenshot with sample data — the printers, addresses and images are made up.</sub>
+
 ## Stack
 
 - **Frontend:** React + Vite (TypeScript)
