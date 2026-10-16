@@ -108,9 +108,19 @@ label {
   background: var(--code-bg);
 }
 
-.printers-list li.is-default {
-  border-color: #e6c200;
-  background: rgba(230, 194, 0, 0.08);
+.printers-list li {
+  cursor: pointer;
+}
+
+.printers-list li.is-active {
+  border-color: #0070f3;
+  background: rgba(0, 112, 243, 0.1);
+}
+
+.printers-list li .p-main:focus-visible {
+  outline: 2px solid #0070f3;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .p-star {

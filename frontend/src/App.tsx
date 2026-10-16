@@ -106,6 +106,8 @@ export default function App() {
   const [progress, setProgress] = useState<PrintProgress | null>(null)
   const [printers, setPrinters] = useState<NetworkPrinter[]>([])
   const [defaultPrinterId, setDefaultPrinterId] = useState('')
+  // Printer picked in the list for this visit only; a reload falls back to the star.
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string | null>(null)
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([])
   const [discovering, setDiscovering] = useState(false)
   const [paperWidthDots, setPaperWidthDots] = useState(576)
@@ -138,7 +140,8 @@ export default function App() {
   const esRef = useRef<EventSource | null>(null)
 
   const defaultPrinter = printers.find((p) => p.id === defaultPrinterId) ?? printers[0]
-  const defaultIp = defaultPrinter?.ip ?? ''
+  const activePrinter = printers.find((p) => p.id === selectedPrinterId) ?? defaultPrinter
+  const activeIp = activePrinter?.ip ?? ''
 
   function refreshJobs() {
     fetch(`${BACKEND_URL}/jobs`)
@@ -302,6 +305,7 @@ export default function App() {
       .catch(() => {})
   }
   function setDefault(id: string) {
+    setSelectedPrinterId(id)
     setTarget(null)
     fetch(`${BACKEND_URL}/printers/${id}/default`, { method: 'POST' })
       .then((r) => (r.ok ? r.json() : null))
@@ -339,15 +343,15 @@ export default function App() {
     }).catch(() => {})
   }
 
-  // Kick the cash drawer wired to the default printer.
+  // Kick the cash drawer wired to the active printer.
   function openDrawer() {
-    if (!IPV4.test(defaultIp)) return
+    if (!IPV4.test(activeIp)) return
     setTesting(true)
     setTestMsg(t.openingDrawer)
     fetch(`${BACKEND_URL}/drawer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: defaultIp, port: defaultPrinter?.port ?? 9100 }),
+      body: JSON.stringify({ ip: activeIp, port: activePrinter?.port ?? 9100 }),
     })
       .then((r) => r.json().catch(() => ({})))
       .then((d) => setTestMsg(d?.ok ? t.drawerOpened : t.drawerFailed(translateBackendError(d?.error ?? t.genericError))))
@@ -482,16 +486,16 @@ export default function App() {
 
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
-    if (!IPV4.test(defaultIp) || items.length === 0) return
+    if (!IPV4.test(activeIp) || items.length === 0) return
 
     setStatus('loading')
     setErrorMsg('')
     setProgress(null)
 
     const formData = new FormData()
-    formData.append('ip', defaultIp)
+    formData.append('ip', activeIp)
     formData.append('copies', String(copies))
-    if (defaultPrinter?.port) formData.append('port', String(defaultPrinter.port))
+    if (activePrinter?.port) formData.append('port', String(activePrinter.port))
     for (const item of items) {
       const blob = await applyRotation(item.file, item.rotation)
       formData.append('images', blob, item.file.name)
@@ -611,12 +615,12 @@ export default function App() {
             </div>
           </div>
 
-          <button type="submit" className="print-btn" disabled={status === 'loading' || items.length === 0 || !IPV4.test(defaultIp)}>
+          <button type="submit" className="print-btn" disabled={status === 'loading' || items.length === 0 || !IPV4.test(activeIp)}>
             {status === 'loading'
               ? progress
                 ? t.printingProgress(progress.current, progress.total)
                 : t.preparing
-              : t.printButton(defaultPrinter?.name, items.length)}
+              : t.printButton(activePrinter?.name, items.length)}
           </button>
         </form>
 
@@ -626,6 +630,8 @@ export default function App() {
         <Printers
           printers={printers}
           defaultPrinterId={defaultPrinterId}
+          activePrinterId={activePrinter?.id ?? ''}
+          onSelect={setSelectedPrinterId}
           discovered={discovered}
           discovering={discovering}
           onRefresh={discoverPrinters}
@@ -687,7 +693,7 @@ export default function App() {
             </span>
             <input type="range" min={-100} max={100} value={contrast} onChange={(e) => { const v = Number(e.target.value); setContrast(v); postSettings({ contrast: v }) }} />
           </label>
-          <button type="button" className="drawer-btn" onClick={openDrawer} disabled={testing || !IPV4.test(defaultIp)}>
+          <button type="button" className="drawer-btn" onClick={openDrawer} disabled={testing || !IPV4.test(activeIp)}>
             {t.openDrawerButton}
           </button>
         </details>

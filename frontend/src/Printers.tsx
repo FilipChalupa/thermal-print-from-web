@@ -41,6 +41,9 @@ function PencilIcon() {
 interface Props {
   printers: NetworkPrinter[]
   defaultPrinterId: string
+  /** Printer the print button targets (picked locally, else the default). */
+  activePrinterId: string
+  onSelect: (id: string) => void
   discovered: DiscoveredPrinter[]
   discovering: boolean
   onRefresh: () => void
@@ -56,6 +59,8 @@ interface Props {
 export default function Printers({
   printers,
   defaultPrinterId,
+  activePrinterId,
+  onSelect,
   discovered,
   discovering,
   onRefresh,
@@ -99,8 +104,15 @@ export default function Printers({
       <ul className="printers-list">
         {printers.map((p) => {
           const isDefault = p.id === defaultPrinterId
+          const isActive = p.id === activePrinterId
           return (
-            <li key={p.id} className={isDefault ? 'is-default' : ''}>
+            <li
+              key={p.id}
+              className={isActive ? 'is-active' : ''}
+              onClick={(e) => {
+                if (!(e.target as HTMLElement).closest('.p-icon, .p-rename')) onSelect(p.id)
+              }}
+            >
               <button
                 type="button"
                 className={`p-star${isDefault ? ' on' : ''}`}
@@ -126,7 +138,19 @@ export default function Printers({
                   }}
                 />
               ) : (
-                <span className="p-main">
+                <span
+                  className="p-main"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isActive}
+                  title={t.selectPrinterTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelect(p.id)
+                    }
+                  }}
+                >
                   <span className="p-name">
                     {p.name}
                     {isDefault && <span className="p-badge">{t.defaultBadge}</span>}
